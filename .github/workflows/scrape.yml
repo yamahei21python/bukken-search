@@ -5,6 +5,31 @@ on:
     # 毎日 JST 07:30 (UTC 22:30) に実行
     - cron: "30 22 * * *"
   workflow_dispatch:  # 手動実行
+    inputs:
+      max_pages:
+        description: "一覧の最大ページ数/駅"
+        default: "50"
+      chinryo_max:
+        description: "賃料上限(万円)"
+        default: "10"
+      list_sleep:
+        description: "一覧1ページ毎の待機秒"
+        default: "3"
+      list_jitter:
+        description: "一覧待機に加えるランダム秒"
+        default: "1.5"
+      detail_limit:
+        description: "詳細の最大取得件数"
+        default: "100000"
+      detail_sleep:
+        description: "詳細1件毎の待機秒"
+        default: "5"
+      detail_jitter:
+        description: "詳細待機に加えるランダム秒"
+        default: "2"
+      detail_max_seconds:
+        description: "詳細の時間上限(秒)"
+        default: "17000"
 
 permissions:
   contents: write
@@ -16,7 +41,17 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # GHA の上限は 360 分。詳細側は --max-seconds で先に止める。
+    timeout-minutes: 355
+    env:
+      MAX_PAGES: ${{ github.event.inputs.max_pages || '50' }}
+      CHINRYO_MAX: ${{ github.event.inputs.chinryo_max || '10' }}
+      LIST_SLEEP: ${{ github.event.inputs.list_sleep || '3' }}
+      LIST_JITTER: ${{ github.event.inputs.list_jitter || '1.5' }}
+      DETAIL_LIMIT: ${{ github.event.inputs.detail_limit || '100000' }}
+      DETAIL_SLEEP: ${{ github.event.inputs.detail_sleep || '5' }}
+      DETAIL_JITTER: ${{ github.event.inputs.detail_jitter || '2' }}
+      DETAIL_MAX_SECONDS: ${{ github.event.inputs.detail_max_seconds || '17000' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,19 +65,37 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Restore DB cache
-        uses: actions/cache@v4
-        with:
-          path: bukken.db
-          key: bukken-db-${{ github.run_id }}
-          restore-keys: |
-            bukken-db-
+      # bukken.db は main に追跡済み。checkout で前回分が復元される。
+      - name: Show current DB
+        run: |
+          ls -la bukken.db || echo "no db yet"
+          python3 - <<'PY' || true
+          import sqlite3
+          c = sqlite3.connect("bukken.db")
+          for t in ("properties", "listings", "costs"):
+              try:
+                  print(t, c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
+              except Exception as e:
+                  print(t, "ERR", e)
+          PY
 
-      - name: List scrape (全駅・10万以下)
-        run: python3 scraper.py --max-pages 4 --chinryo-max 10
+      - name: List scrape (全駅・低負荷)
+        # 負荷軽減: 1ページ毎に sleep + jitter。長く回して多く取る。
+        run: |
+          python3 scraper.py \
+            --max-pages "$MAX_PAGES" \
+            --chinryo-max "$CHINRYO_MAX" \
+            --sleep "$LIST_SLEEP" \
+            --jitter "$LIST_JITTER"
 
-      - name: Detail scrape (未取得のみ)
-        run: python3 detail_scraper.py --limit 100
+      - name: Detail scrape (未取得のみ・低負荷)
+        # only_missing のため中断しても次回に継続。時間上限で安全に停止。
+        run: |
+          python3 detail_scraper.py \
+            --limit "$DETAIL_LIMIT" \
+            --sleep "$DETAIL_SLEEP" \
+            --jitter "$DETAIL_JITTER" \
+            --max-seconds "$DETAIL_MAX_SECONDS"
 
       - name: Rank
         run: python3 rank.py --max-total 100000 --walk-max 10 | tee rank_out.txt
@@ -55,6 +108,7 @@ jobs:
         run: python3 notify.py
 
       - name: Commit DB
+        if: ${{ always() }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -63,7 +117,9 @@ jobs:
             echo "no db changes"
           else
             git commit -m "scrape: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            git push
+            git fetch origin "$GITHUB_REF_NAME"
+            git rebase "origin/$GITHUB_REF_NAME"
+            git push origin "HEAD:$GITHUB_REF_NAME"
           fi
 
       - name: Upload artifact

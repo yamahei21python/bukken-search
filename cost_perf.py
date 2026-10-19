@@ -1,0 +1,273 @@
+"""コスパ抽出: ヘドニック公正価値に対する割安度で優良物件をランキングする。
+
+「同条件の平均より安い」方式は、駅や間取りが元々安いだけの物件を拾ってしまう。
+ここでは log(総額) を属性で回帰した公正価値(fair)を基準に、実際の総額が
+どれだけ割安かを残差で測る。単一の属性セルに依存しないため母数が薄い条件でも安定する。
+
+使い方:
+  python3 cost_perf.py                          # コスパ上位30件
+  python3 cost_perf.py --top 50 --min-disc 0.12
+  python3 cost_perf.py --walk-max 7 --min-area 20 --layout 1K 1DK
+  python3 cost_perf.py --audit                  # クレンジング対象行を出力
+  python3 cost_perf.py --json                   # 機械可読出力
+
+注意:
+  costs(初期費用)の取得率が低い場合は、賃料ベースの割安度のみ表示する。
+  初期費用が揃う行は実質総額ベースのコスパも併記する。
+"""
+import argparse
+import json
+import re
+import sqlite3
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import GroupKFold
+
+DB = Path(__file__).parent / "bukken.db"
+
+# 希少レイアウトを代表区分へ寄せる
+LAYOUT_MAP = {"ワンルーム": "1R", "ワンル": "1R", "1SLK": "1K", "1SK": "1K",
+              "1SLDK": "1LDK", "2SLDK": "2LDK", "3SLDK": "3LDK"}
+# 非返還初期費用(model.py の total_2year と同じ定義)
+NONREFUND_COLS = ["key_money_yen", "agency_yen", "guarantee_first_yen",
+                  "insurance_yen", "key_exchange_yen", "cleaning_yen"]
+
+QUERY = """
+SELECT p.id, p.name, p.station, p.address, p.walk_min, p.age_years,
+       p.room_floor, p.rent_yen, p.admin_yen, p.total_yen, p.layout,
+       p.area_m2, p.has_bathtub, p.equipment, p.detail_url,
+       c.fetched, c.key_money_yen, c.deposit_yen, c.agency_yen,
+       c.guarantee_first_yen, c.guarantee_renew_yen, c.insurance_yen,
+       c.key_exchange_yen, c.cleaning_yen, c.support_yen,
+       c.water_fixed_yen, c.renewal_fee_yen, c.contract_months,
+       c.free_rent_months
+FROM properties p
+LEFT JOIN costs c
+  ON c.listing_id = (SELECT id FROM listings WHERE url = p.detail_url)
+"""
+
+
+def jnc(url):
+    m = re.search(r"jnc_(\d+)", url or "")
+    return m.group(1) if m else None
+
+
+def load(con):
+    return pd.read_sql_query(QUERY, con)
+
+
+def audit(df):
+    """クレンジング対象を列挙する(母集団は触らずレポートのみ)。"""
+    df = df.assign(jnc=df.detail_url.map(jnc))
+    bad_admin = (df.admin_yen > df.rent_yen * 0.5) & (df.area_m2 < 40)
+    dup = df[df.duplicated("jnc", keep=False) & df.jnc.notna()]
+    report = {
+        "admin_parse_error": df.loc[bad_admin, ["id", "name", "rent_yen",
+                                                "admin_yen", "area_m2"]]
+        .to_dict("records"),
+        "admin_parse_error_n": int(bad_admin.sum()),
+        "duplicate_jnc_n": int(dup.shape[0]),
+        "duplicate_jnc_excess": int(dup.shape[0] - dup.jnc.nunique()),
+        "station_missing_n": int((df.station.isna()
+                                  | (df.station == "")).sum()),
+        "area_lt12_n": int((df.area_m2 < 12).sum()),
+        "area_gt110_n": int((df.area_m2 > 110).sum()),
+        "bath_unknown_n": int((df.has_bathtub == -1).sum()),
+        "equipment_empty_n": int((df.equipment.isna()
+                                  | (df.equipment == "")).sum()),
+    }
+    return report
+
+
+def clean(df):
+    """クレンジング前でも破綻しないよう防御的に処理する。"""
+    df = df.assign(jnc=df.detail_url.map(jnc)).sort_values("id")
+    # jnc不明行は保持し、同一SUUMO物件(jnc)だけ1行へ
+    known = df.jnc.notna()
+    df = pd.concat([
+        df.loc[~known],
+        df.loc[known].drop_duplicates("jnc", keep="last"),
+    ]).sort_index()
+
+    # 管理費パース破損を無効化し total を再計算
+    bad = (df.admin_yen > df.rent_yen * 0.5) & (df.area_m2 < 40)
+    df.loc[bad, "admin_yen"] = np.nan
+    df["total_yen"] = df.rent_yen + df.admin_yen.fillna(0)
+
+    df["station"] = (df.station.fillna("NA").replace("", "NA"))
+    df["layout"] = df.layout.replace(LAYOUT_MAP)
+    df["layout"] = df.layout.fillna("NA")
+    df["age_years"] = df.age_years.clip(0, 45)
+    df["room_floor"] = df.room_floor.clip(1, 30)
+    return df
+
+
+def scope(df, a):
+    m = (
+        df.total_yen.between(45000, a.max_total)
+        & df.area_m2.between(a.min_area, a.max_area)
+        & df.walk_min.between(0, a.walk_max)
+        & (df.station != "NA")
+    )
+    if a.layout:
+        m &= df.layout.isin(a.layout)
+    if a.station:
+        m &= df.station.isin(a.station)
+    if a.no_tub:
+        m &= df.has_bathtub == 0
+    return df[m].copy()
+
+
+def build_features(df):
+    X = pd.get_dummies(df[["station", "layout"]], drop_first=True)
+    X["area"] = df.area_m2
+    X["area_sq"] = df.area_m2 ** 2
+    X["age"] = df.age_years
+    X["walk"] = df.walk_min
+    X["floor"] = df.room_floor
+    return X.astype(float)
+
+
+def fit_fair(df, alpha):
+    """公正価値(賃料ベース月額)を返す。建物単位のGroupKFoldで品質を測る。
+
+    ranking には OOF(学習に使っていない予測)を使う。学習データ自身の残差は
+    割安度が楽観的に出るため。--insample 指定時は全学習予測を使う。
+    """
+    X = build_features(df)
+    y = np.log(df.total_yen.values)
+    groups = df.name.values
+    n_groups = df.name.nunique()
+
+    if n_groups >= 2:
+        cv_pred = np.zeros(len(df))
+        gkf = GroupKFold(n_splits=min(5, n_groups))
+        for tr, te in gkf.split(X, y, groups):
+            cv_pred[te] = np.exp(Ridge(alpha=alpha).fit(X.iloc[tr], y[tr])
+                                 .predict(X.iloc[te]))
+    else:
+        cv_pred = np.exp(Ridge(alpha=alpha).fit(X, y).predict(X))
+    r2 = 1 - np.sum((y - np.log(cv_pred)) ** 2) / np.sum((y - y.mean()) ** 2)
+    mae = mean_absolute_error(df.total_yen, cv_pred)
+
+    insample = np.exp(Ridge(alpha=alpha).fit(X, y).predict(X))
+    sigma = max(float(np.std(y - np.log(cv_pred))), np.finfo(float).eps)
+    return cv_pred, insample, {"r2": float(r2), "mae_yen": float(mae),
+                               "sigma_log": sigma}
+
+
+def value_or_zero(value):
+    return value if pd.notna(value) else 0
+
+
+def nonrefund_total(r):
+    return sum(value_or_zero(r[col]) for col in NONREFUND_COLS)
+
+
+def effective_monthly(r):
+    """実質月額: 管理費+水道+サポート+更新/契約月+保証更新/12+初期非返還/24。"""
+    months = value_or_zero(r.contract_months) or 24
+    return (r.total_yen + value_or_zero(r.water_fixed_yen)
+            + value_or_zero(r.support_yen)
+            + value_or_zero(r.guarantee_renew_yen) / 12
+            + value_or_zero(r.renewal_fee_yen) / months
+            + nonrefund_total(r) / 24)
+
+
+def total_2year(r):
+    return (r.total_yen * 24 + nonrefund_total(r) + value_or_zero(r.deposit_yen)
+            + value_or_zero(r.renewal_fee_yen)
+            + value_or_zero(r.guarantee_renew_yen) * 2
+            - r.total_yen * value_or_zero(r.free_rent_months))
+
+
+def rank(df, fair, meta, a):
+    out = df.copy()
+    out["fair"] = fair
+    out["discount"] = 1 - out.total_yen / out.fair
+    out["save_yen"] = out.fair - out.total_yen
+    out["z"] = -out.discount / meta["sigma_log"]
+    out.loc[out.discount <= 0, "discount"] = 0
+
+    fetched = out.fetched.fillna(0).astype(int) == 1
+    if fetched.any():
+        out.loc[fetched, "eff_monthly"] = out[fetched].apply(
+            effective_monthly, axis=1)
+        out.loc[fetched, "t2"] = out[fetched].apply(total_2year, axis=1)
+        # 初期費用が揃う行は総額ベースのコスパも算出
+        eff = out.eff_monthly
+        out.loc[fetched, "cost_perf"] = out.loc[fetched, "fair"] / eff[fetched]
+
+    out = out[out.discount >= a.min_disc]
+    out = out.sort_values("discount", ascending=False)
+    return out.head(a.top)
+
+
+def fmt(row, a):
+    flag = " !" if row.z >= 3 else ""
+    base = (f"[{row.discount:5.1%}] -{row.save_yen/10000:4.2f}万 "
+            f"実{row.total_yen/10000:4.1f}万(公{row.fair/10000:4.1f}万) "
+            f"{row.layout:>4} {row.area_m2:5.1f}m2 歩{row.walk_min}分 "
+            f"築{row.age_years}年 {row.station} | {row['name']}{flag}")
+    if pd.notna(row.get("cost_perf")):
+        base += f" | 総額コスパ{row.cost_perf:4.2f} 2年{row.t2/10000:.1f}万"
+    return base
+
+
+def main():
+    ap = argparse.ArgumentParser(description="ヘドニック割安度で優良物件抽出")
+    ap.add_argument("--top", type=int, default=30)
+    ap.add_argument("--min-disc", type=float, default=0.0, dest="min_disc")
+    ap.add_argument("--max-total", type=int, default=300000, dest="max_total")
+    ap.add_argument("--min-area", type=float, default=12, dest="min_area")
+    ap.add_argument("--max-area", type=float, default=110, dest="max_area")
+    ap.add_argument("--walk-max", type=int, default=15, dest="walk_max")
+    ap.add_argument("--layout", nargs="*")
+    ap.add_argument("--station", nargs="*")
+    ap.add_argument("--no-tub", action="store_true", dest="no_tub")
+    ap.add_argument("--alpha", type=float, default=3.0)
+    ap.add_argument("--insample", action="store_true",
+                    help="ランキングに学習データ自身の予測を使う(楽観的)")
+    ap.add_argument("--audit", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+
+    with sqlite3.connect(DB) as con:
+        raw = load(con)
+
+    if a.audit:
+        print(json.dumps(audit(raw), ensure_ascii=False, indent=2))
+        return
+
+    df = clean(raw)
+    df = scope(df, a)
+    if len(df) < 30:
+        print(f"母数不足: {len(df)}件。フィルタを緩めてください。")
+        return
+
+    cv_pred, insample, meta = fit_fair(df, a.alpha)
+    fair = insample if a.insample else cv_pred
+    hits = rank(df, fair, meta, a)
+
+    if a.json:
+        cols = ["name", "station", "layout", "area_m2", "age_years", "walk_min",
+                "room_floor", "rent_yen", "admin_yen", "total_yen", "fair",
+                "discount", "save_yen", "detail_url"]
+        cols = [c for c in cols if c in hits.columns]
+        print(json.dumps(hits[cols].to_dict("records"),
+                         ensure_ascii=False, default=float, indent=2))
+        return
+
+    print(f"母数{len(df)}件 / モデル CV R2={meta['r2']:.3f} "
+          f"MAE={meta['mae_yen']:.0f}円 / ヒット{len(hits)}件 "
+          f"(!は要データ確認の外れ値)")
+    for _, row in hits.iterrows():
+        print(fmt(row, a))
+
+
+if __name__ == "__main__":
+    main()

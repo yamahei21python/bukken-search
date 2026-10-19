@@ -1,132 +1,148 @@
-"""詳細ページ取得: 初期費用・証拠付き湯船判定・スナップショット
-低頻度・差分・リトライ3・robots配慮(連打禁止・1秒間隔)。"""
-import re
-import sqlite3
+"""詳細ページ取得: 初期費用・設備・湯船証拠・スナップショットを取り込む。
+
+parse_suumo.parse_detail（20物件で検証済み）を使い、
+  - costs（初期費用の実額）を fetched=1 で確定
+  - properties / listings / units / buildings を更新
+  - listing_snapshots と evidence を追記
+する。連打禁止・リトライ付き。
+
+使い方:
+  python3 detail_scraper.py --limit 100            # 未取得のみ
+  python3 detail_scraper.py --all --limit 50       # 7日以上前も再取得
+  python3 detail_scraper.py --detail-html FILE      # 保存済みHTMLを解析(オフライン)
+"""
+import argparse
 import time
 from pathlib import Path
-import requests
+
 from bs4 import BeautifulSoup
+
 from models import judge_tub
-DB = Path(__file__).parent / "bukken.db"
-H = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+from db import connect_db
+from parse_suumo import canonical_url, parse_detail
+from scrape_common import fetch_soup, sleep_with_jitter
+_TUB_INT = {"confirmed_no_tub": 0, "likely_no_tub": 0,
+            "confirmed_tub": 1, "likely_tub": 1, "unknown": -1}
 
-def fetch(url, retry=3):
-    for i in range(retry):
-        try:
-            r = requests.get(url, headers=H, timeout=20)
-            r.raise_for_status()
-            return BeautifulSoup(r.text, "lxml")
-        except Exception as e:
-            if i == retry - 1:
-                raise
-            time.sleep(2 * (i + 1))
 
-YEN = lambda s: int(float(m.group(1)) * 10000) if (m := re.search(r"([\d.]+)万円", s or "")) else (int(m.group(1)) if (m := re.search(r"(\d+)円", s or "")) else 0)
+def fetch(url: str, retry: int = 3) -> BeautifulSoup:
+    """詳細URL取得。429/5xxと通信例外を再試行。"""
+    return fetch_soup(url, retry=retry, retry_delay=2)
 
-def parse_detail(soup):
-    feat = ""
-    for h in soup.find_all(["h2", "h3"]):
-        if "部屋の特徴" in h.get_text() or "設備" in h.get_text():
-            feat = h.parent.get_text(" ", strip=True)
-            break
-    full = soup.get_text(" ", strip=True)
-    lines = soup.get_text("\n", strip=True).split("\n")
 
-    def field_value(label):
-        """「敷金: -」「礼金: 9.3万円」形式の行から厳密抽出。-は0扱いではなくNone。"""
-        import unicodedata as _ud
-        for ln in lines:
-            s = _ud.normalize("NFKC", ln).strip()
-            if s.startswith(label + ":") or s.startswith(label + " :"):
-                v = s.split(":", 1)[1].strip().replace("\xa0", "")
-                if v in ("-", "−", "‐", ""):
-                    return None
-                return v
-        return None
-
-    def grab(*keys):
-        for k in keys:
-            m = re.search(k + r"[^0-9]{0,10}([\d.]+万円|\d+円|なし|不要|込|無料)", full)
-            if m:
-                return m.group(1)
-        return ""
-    fv_shiki = field_value("敷金")
-    fv_rei = field_value("礼金")
-    costs = dict(shikikin=fv_shiki if fv_shiki is not None else "",
-                 reikin=fv_rei if fv_rei is not None else "",
-                 shikikin_none=fv_shiki is None,
-                 reikin_none=fv_rei is None,
-                 guarantee=grab("保証会社", "保証料"),
-                 insurance=grab("火災保険", "損保"),
-                 keyex=grab("鍵交換"), cleaning=grab("清掃費", "クリーニング", "ハウスクリーニング"),
-                 support=grab("サポート", "安心サポート", "CLUB"),
-                 renewal=grab("更新料"),
-                 agency=grab("仲介手数料", "仲介料"),
-                 regular=0 if "定期借家" in full else 1,
-                 freerent=1 if "フリーレント" in full else 0)
-    m = re.search(r".{0,60}(シャワー|浴槽|湯船|バス|浴室).{0,60}", feat or full)
-    outline = (m.group(0)[:300] if m else (feat or full)[:300])
-    photos = [img.get("src", "") for img in soup.select("img")][:10]
-    return feat[:4000], costs, outline, photos
-
-def run(limit=50, sleep=1.0, only_missing=True):
-    con = sqlite3.connect(DB)
-    q = ("SELECT l.id,l.url,u.id FROM listings l JOIN units u ON u.id=l.unit_id"
-         " LEFT JOIN listing_snapshots s ON s.listing_id=l.id")
-    if only_missing:
-        q += " WHERE l.active=1 AND s.id IS NULL"
-    else:
-        q += (" WHERE l.active=1 AND (s.id IS NULL OR l.last_seen < "
-              "datetime('now','-7 days'))")
+def targets(con, limit, only_missing):
+    q = ("SELECT l.id, l.url, u.id FROM listings l JOIN units u ON u.id=l.unit_id"
+         " LEFT JOIN costs c ON c.listing_id=l.id")
+    q += (" WHERE l.active=1 AND (c.fetched IS NULL OR c.fetched=0)"
+          if only_missing else
+          " WHERE l.active=1 AND (c.fetched IS NULL OR c.fetched=0"
+          " OR l.last_seen < datetime('now','-7 days'))")
     q += " GROUP BY l.id LIMIT ?"
-    rows = con.execute(q, (limit,)).fetchall()
+    return con.execute(q, (limit,)).fetchall()
+
+
+def apply_detail(con, lid, uid, url, d):
+    status, kw, conf = judge_tub(d["equipment"])
+    hb = _TUB_INT.get(status, -1)
+    note = (d.get("note") or "")
+    if d.get("hoshoukin_yen") is not None:
+        note += f" 保証金{d['hoshoukin_yen']}"
+    if d.get("shoukyaku_yen") is not None:
+        note += f" 敷引償却{d['shoukyaku_yen']}"
+
+    con.execute("UPDATE listings SET rent_yen=COALESCE(?,rent_yen),"
+                " admin_yen=COALESCE(?,admin_yen), shikikin=?, reikin=?,"
+                " last_seen=datetime('now','localtime') WHERE id=?",
+                (d["rent_yen"], d["admin_yen"], str(d["deposit_yen"]),
+                 str(d["key_money_yen"]), lid))
+    con.execute(
+        "UPDATE properties SET rent_yen=COALESCE(?,rent_yen),"
+        " admin_yen=COALESCE(?,admin_yen),"
+        " total_yen=COALESCE(?,total_yen),"
+        " shikikin_yen=COALESCE(?,shikikin_yen),"
+        " reikin_yen=COALESCE(?,reikin_yen),"
+        " equipment=?, has_bathtub=?, no_bathtub_evidence=?,"
+        " direction=COALESCE(?,direction),"
+        " structure=COALESCE(?,structure), floors=COALESCE(?,floors),"
+        " scraped_at=datetime('now','localtime') WHERE detail_url=?",
+        (d["rent_yen"], d["admin_yen"],
+         (d["rent_yen"] or 0) + (d["admin_yen"] or 0) if d["rent_yen"] else None,
+         d["deposit_yen"], d["key_money_yen"], d["equipment"], hb,
+         (kw + " | " + d["equipment"])[:400], d["direction"],
+         d["structure"], d["floors"], canonical_url(url)))
+    con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
+                " direction=COALESCE(?,direction) WHERE id=?",
+                (status, conf, d["direction"], uid))
+    con.execute("INSERT INTO listing_snapshots(listing_id,rent_yen,admin_yen,"
+                "active,equip_text) VALUES(?,?,?,1,?)",
+                (lid, d["rent_yen"], d["admin_yen"], d["equipment"][:2000]))
+    con.execute("INSERT INTO evidence(unit_id,tub_status,quote,url,method,"
+                "confidence) VALUES(?,?,?,?,?,?)",
+                (uid, status, (kw + " | " + d["equipment"][:400]), url,
+                 "detail_parse", conf))
+    con.execute(
+        "INSERT OR REPLACE INTO costs(listing_id,key_money_yen,deposit_yen,"
+        "guarantee_first_yen,guarantee_renew_yen,insurance_yen,key_exchange_yen,"
+        "cleaning_yen,support_yen,water_fixed_yen,renewal_fee_yen,"
+        "contract_months,free_rent_months,regular_lease,fetched,note) VALUES"
+        "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
+        (lid, d["key_money_yen"], d["deposit_yen"], d["guarantee_first_yen"],
+         d["renewal_fee_yen"], d["insurance_yen"], d["key_exchange_yen"],
+         d["cleaning_yen"], d["support_yen"], d["water_fixed_yen"],
+         d["renewal_fee_yen"], d["contract_months"] or 24,
+         d["free_rent_months"], d["regular_lease"], note[:500]))
+
+
+def run(limit=50, sleep=5.0, jitter=2.0, only_missing=True, max_seconds=0):
+    con = connect_db()
+    rows = targets(con, limit, only_missing)
     print(f"detail targets: {len(rows)} (only_missing={only_missing})")
+    start = time.time()
+    done = 0
     for lid, url, uid in rows:
         if not url:
             continue
+        if max_seconds and time.time() - start > max_seconds:
+            print(f"time budget reached ({max_seconds}s); stopping "
+                  f"({done}/{len(rows)})")
+            break
         try:
-            soup = fetch(url)
-            feat, costs, outline, photos = parse_detail(soup)
-            status, kw, conf = judge_tub(feat)
-            lid_rent = con.execute("SELECT rent_yen,admin_yen FROM listings WHERE id=?", (lid,)).fetchone()
-            con.execute("INSERT INTO listing_snapshots(listing_id,rent_yen,admin_yen,active,equip_text)"
-                        " VALUES(?,?,?,?,?)", (lid, lid_rent[0], lid_rent[1], 1, feat[:2000]))
-            con.execute("UPDATE units SET tub_status=?,tub_confidence=? WHERE id=?", (status, conf, uid))
-            con.execute("INSERT INTO evidence(unit_id,tub_status,quote,url,photo_url,method,confidence)"
-                        " VALUES(?,?,?,?,?,?,?)",
-                        (uid, status, (kw + " | " + outline)[:500], url,
-                         (photos[0] if photos else ""), "detail_parse", conf))
-            con.execute("INSERT OR REPLACE INTO costs(listing_id,key_money_yen,deposit_yen,"
-                        "agency_yen,"
-                        "guarantee_first_yen,insurance_yen,key_exchange_yen,cleaning_yen,"
-                        "support_yen,renewal_fee_yen,regular_lease,fetched,note)"
-                        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (lid, YEN(costs["shikikin"]), YEN(costs["reikin"]), YEN(costs["agency"]),
-                         YEN(costs["guarantee"]),
-                         YEN(costs["insurance"]), YEN(costs["keyex"]), YEN(costs["cleaning"]),
-                         YEN(costs["support"]), YEN(costs["renewal"]), costs["regular"], 1,
-                         ("free-rent " if costs["freerent"] else "")
-                         + ("shiki-none " if costs.get("shikikin_none") else "")
-                         + ("rei-none " if costs.get("reikin_none") else "")
-                         + outline[:200]))
-            con.execute("UPDATE listings SET last_seen=datetime('now','localtime') WHERE id=?", (lid,))
+            d = parse_detail(fetch(url))
+            apply_detail(con, lid, uid, url, d)
             con.commit()
-            print(lid, status, kw, outline[:60])
+            done += 1
+            print(f"{lid} {d['rent_yen']}/{d['admin_yen']} "
+                  f"鍵{d['key_exchange_yen']} 清{d['cleaning_yen']} "
+                  f"{d['equipment'][:40]}")
         except Exception as e:
             print(lid, "ERR", str(e)[:120])
-            try:
-                con.execute("INSERT INTO listing_snapshots(listing_id,active,equip_text)"
-                            " VALUES(?,0,?)", (lid, str(e)[:200]))
-                con.commit()
-            except Exception:
-                pass
-        time.sleep(sleep)
+        sleep_with_jitter(sleep, jitter)
     con.close()
+    print(f"detail done: {done}/{len(rows)}")
 
-if __name__ == "__main__":
-    import argparse
+
+def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--all", action="store_true",
-                    help="取得済みが7日以上古いものも再取得")
-    run(ap.parse_args().limit, only_missing=not ap.parse_args().all)
+                    help="7日以上前も再取得")
+    ap.add_argument("--sleep", type=float, default=5.0,
+                    help="1件毎の待機秒(負荷軽減)")
+    ap.add_argument("--jitter", type=float, default=2.0,
+                    help="待機に加えるランダム幅(秒)")
+    ap.add_argument("--max-seconds", type=int, default=0,
+                    help="この秒数を超えたら中断(0=無制限)")
+    ap.add_argument("--detail-html", type=Path,
+                    help="保存済み詳細HTMLを解析して表示(DB更新なし)")
+    a = ap.parse_args()
+    if a.detail_html:
+        d = parse_detail(BeautifulSoup(a.detail_html.read_text(), "lxml"))
+        for k, v in d.items():
+            print(f"{k}: {v}")
+        return
+    run(a.limit, sleep=a.sleep, jitter=a.jitter, only_missing=not a.all,
+        max_seconds=a.max_seconds)
+
+
+if __name__ == "__main__":
+    main()

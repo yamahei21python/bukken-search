@@ -1,250 +1,194 @@
-"""阿波座＋周辺駅 賃貸スクレイパー + SQLite DB
-SUUMO 複数駅(config.yaml の ek_codes)の一覧→詳細を巡回しDB化する。
+"""賃貸スクレイパー: SUUMO一覧 -> 正規化DB + properties へ取り込む。
+
+旧版からの修正点:
+  - 一覧 td を固定位置で読む(空セル除去による桁ズレを排除) -> parse_suumo
+  - 駅はカセット内の全「路線/駅 歩N分」を取得し最寄りを採用。検索駅の固定代入を廃止
+  - URL は ?bc= を除去して正規化。jnc 番号で重複排除(旧: UNIQUEが効かず重複混入)
+  - properties に shikikin/reikin/direction/structure/floors 等を最初から作成
+  - 正規化テーブル(buildings/units/stations/listings/costs)を直接更新
+
 使い方:
-  python3 scraper.py --max-pages 3                 # configの全駅
+  python3 scraper.py --rebuild --max-pages 3           # DB再作成して取得
   python3 scraper.py --stations 阿波座 本町 --max-pages 2
+  python3 scraper.py --list-html path/to/list.html     # 保存済みHTMLを解析(オフライン)
 """
-import argparse, re, sqlite3, time
+import argparse
+import time
 from pathlib import Path
-import requests
+
 import yaml
 from bs4 import BeautifulSoup
 
+from db import DB, connect_db, initialize_db
+from parse_suumo import normalize_address, normalize_building_name, parse_list
+from scrape_common import fetch_soup, sleep_with_jitter
+
 BASE = "https://suumo.jp"
 CFG = yaml.safe_load(open(Path(__file__).parent / "config.yaml"))
-EK_CODES = CFG["ek_codes"]  # {駅名: ek_xxxxx}
-HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
-DB = Path(__file__).parent / "bukken.db"
+EK_CODES = CFG["ek_codes"]
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS properties (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT, address TEXT, walk_min INTEGER, station TEXT,
-  age_years INTEGER, room_floor INTEGER,
-  rent_yen INTEGER, admin_yen INTEGER, total_yen INTEGER,
-  shikikin_yen INTEGER, reikin_yen INTEGER,
-  layout TEXT, area_m2 REAL,
-  detail_url TEXT UNIQUE,
-  equipment TEXT, has_bathtub INTEGER,
-  no_bathtub_evidence TEXT,
-  scraped_at TEXT DEFAULT (datetime('now','localtime'))
-);
-"""
+def init_db(rebuild=False):
+    """互換維持用ラッパー。実体はdb.initialize_db。"""
+    initialize_db(rebuild=rebuild)
 
-def init_db():
-    con = sqlite3.connect(DB)
-    con.executescript(SCHEMA)
-    # 既存DBのカラム追加（station / shikikin_yen / reikin_yen）
-    cols = [c[1] for c in con.execute("PRAGMA table_info(properties)")]
-    for col, typ in [("station", "TEXT"), ("shikikin_yen", "INTEGER"), ("reikin_yen", "INTEGER")]:
-        if col not in cols:
-            con.execute(f"ALTER TABLE properties ADD COLUMN {col} {typ}")
-    con.commit(); con.close()
 
-def parse_yen(s):
-    if not s:
-        return None
-    s = s.strip().replace(",", "")
-    m = re.search(r"([\d.]+)万円", s)
-    if m:
-        return int(float(m.group(1)) * 10000)
-    m = re.search(r"(\d+)円", s)
-    if m:
-        return int(m.group(1))
-    return 0 if ("-" in s or "−" in s) else None
-
-def list_url(page=1, chinryo_max_man=7, ek="ek_01690"):
-    u = f"{BASE}/chintai/osaka/{ek}/?fr_chinryomax={chinryo_max_man}"
+def list_url(page, ek, chinryo_max):
+    u = f"{BASE}/chintai/osaka/{ek}/?fr_chinryomax={chinryo_max}"
     if page > 1:
         u += f"&page={page}"
     return u
 
-def fetch(url):
-    r = requests.get(url, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    return BeautifulSoup(r.text, "lxml")
-def parse_list(soup, station="阿波座"):
-    out = []
-    # 徒歩分数は「○○駅 歩X分」を全て拾い、最寄り=最小のものを採用
-    for cassette in soup.select(".cassetteitem"):
-        head = cassette.select_one(".cassetteitem_content-title")
-        name = head.get_text(strip=True) if head else ""
-        # SUUMOカセットヘッダの「路線+駅+階建+築年」混入を除去
-        for pat in CFG.get("building_name_strip_patterns", []):
-            name = re.sub(pat, "", name).strip()
-        addr = cassette.select_one(".cassetteitem_detail-col1")
-        address = addr.get_text(" ", strip=True) if addr else ""
-        dt = cassette.get_text(" ", strip=True)
-        walks = [int(x) for x in re.findall(r"駅\s*歩(\d+)分", dt)]
-        walk = min(walks) if walks else None
-        ma = re.search(r"築(\d+)年", dt)
-        age = int(ma.group(1)) if ma else (0 if "新築" in dt else None)
-        for row in cassette.select(".cassetteitem_other tbody tr.js-cassette_link"):
-            cols = [c.get_text(" ", strip=True) for c in row.select("td")]
-            cols = [c for c in cols if c != ""]  # 空td除去
-            durl = None
-            for a in row.select("a[href]"):
-                h = a.get("href", "")
-                if "/chintai/jnc_" in h or "bc=" in h:
-                    durl = h if h.startswith("http") else BASE + h
-                    break
-            fl = None
-            if cols and re.search(r"(\d+)階", cols[0]):
-                fl = int(re.search(r"(\d+)階", cols[0]).group(1))
-            rent = parse_yen(cols[1] if len(cols) > 1 else "")
-            admin = None
-            if len(cols) > 1:
-                ms = re.findall(r"([\d.]+万円|\d+円|-)", cols[1])
-                if len(ms) >= 2:
-                    admin = parse_yen(ms[1])
-            # 敷金/礼金（cols[2] 例: "9.3万円 11.8万円" / "- 9.3万円"）
-            shiki = rei = None
-            if len(cols) > 2:
-                sm = re.findall(r"([\d.]+万円|\d+円|-)", cols[2])
-                if len(sm) >= 1:
-                    shiki = parse_yen(sm[0])
-                if len(sm) >= 2:
-                    rei = parse_yen(sm[1])
-            lm = re.search(r"(ワンルーム|\d[SLDK]+)", " ".join(cols))
-            layout = lm.group(1) if lm else ""
-            am = re.search(r"([\d.]+)m", " ".join(cols))
-            area = float(am.group(1)) if am else None
-            out.append(dict(name=name, address=address, walk_min=walk,
-                            station=station,
-                            age_years=age, room_floor=fl, rent_yen=rent,
-                            admin_yen=admin, total_yen=(rent or 0) + (admin or 0),
-                            shikikin_yen=shiki, reikin_yen=rei,
-                            layout=layout, area_m2=area, detail_url=durl))
-    return out
 
-SHOWER_ONLY = ["シャワーのみ", "シャワールーム", "シャワーブース",
-               "バスなし", "浴室なし", "湯船なし"]
+def fetch(url: str, retry: int = 3) -> BeautifulSoup:
+    """一覧URL取得。429/5xxを再試行。"""
+    return fetch_soup(url, retry=retry, retry_delay=5)
 
-def judge_bath(t):
-    t = t or ""
-    for kw in SHOWER_ONLY:
-        if kw in t:
-            return 0, kw
-    for kw in ["浴槽", "湯船", "追い焚", "追焚", "バスタブ",
-               "ユニットバス", "バス・トイレ別", "バストイレ別"]:
-        if kw in t:
-            return 1, kw
-    return -1, ""
 
-def fetch_detail(url, sleep=1.0):
-    time.sleep(sleep)
-    try:
-        soup = fetch(url)
-    except Exception as e:
-        return "", -1, "fetch_error:" + str(e)[:100]
-    feat = ""
-    for h in soup.find_all(["h2", "h3"]):
-        if "部屋の特徴" in h.get_text() or "設備" in h.get_text():
-            feat = h.parent.get_text(" ", strip=True)
-            break
-    if not feat:
-        feat = " ".join([t.get_text(" ", strip=True)
-                         for t in soup.select("table")])
-    hb, kw = judge_bath(feat)
-    m = re.search(r".{0,60}(シャワー|浴槽|湯船|バス|浴室).{0,60}", feat)
-    ev = m.group(0)[:300] if m else feat[:300]
-    return feat[:4000], hb, (kw + " | " + ev)[:500]
+def _get_or_create_building(con, r):
+    na = normalize_address(r["address"])
+    nn = normalize_building_name(r["name"]) or r["name"]
+    row = con.execute("SELECT id,age_years,structure,floors FROM buildings"
+                      " WHERE norm_address=? AND norm_name=?", (na, nn)).fetchone()
+    if row:
+        con.execute("UPDATE buildings SET age_years=COALESCE(?,age_years),"
+                    " structure=COALESCE(?,structure), floors=COALESCE(?,floors)"
+                    " WHERE id=?", (r["age_years"], r.get("structure"),
+                                    r["floors"], row[0]))
+        return row[0]
+    con.execute("INSERT INTO buildings(norm_address,name,norm_name,age_years,"
+                "structure,floors) VALUES(?,?,?,?,?,?)",
+                (na, r["name"], nn, r["age_years"], r.get("structure"),
+                 r["floors"]))
+    return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def _get_or_create_unit(con, bid, r):
+    if not r["area_m2"]:
+        return None
+    row = con.execute(
+        "SELECT id FROM units WHERE building_id=? AND layout=? "
+        "AND abs(area_m2-?)<=0.3 AND (floor IS ? OR floor=?)",
+        (bid, r["layout"], r["area_m2"], r["floor"], r["floor"])).fetchone()
+    if row:
+        return row[0]
+    con.execute("INSERT INTO units(building_id,floor,area_m2,layout,direction)"
+                " VALUES(?,?,?,?,?)",
+                (bid, r["floor"], r["area_m2"], r["layout"], r.get("direction")))
+    return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def _save_stations(con, uid, stations, nearest):
+    if not uid:
+        return
+    seen = set()
+    for s in stations or []:
+        seen.add((s["name"], s["line"]))
+        con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,walk_min)"
+                    " VALUES(?,?,?,?)", (uid, s["name"], s["line"], s["walk"]))
+    if not stations and nearest.get("name"):
+        con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,walk_min)"
+                    " VALUES(?,?,?,?)",
+                    (uid, nearest["name"], nearest.get("line"), nearest["walk"]))
+
 
 def save(rows):
-    """旧properties＋新スキーマの両方へ保存(新DBが正本)。"""
-    con = sqlite3.connect(DB)
+    """一覧取得行を properties と正規化テーブルへ upsert。"""
+    con = connect_db()
+    n = 0
     for r in rows:
-        try:
-            con.execute("""INSERT OR REPLACE INTO properties
-            (name,address,walk_min,station,age_years,room_floor,rent_yen,
-             admin_yen,total_yen,shikikin_yen,reikin_yen,layout,area_m2,detail_url,
-             equipment,has_bathtub,no_bathtub_evidence)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (r.get("name"), r.get("address"), r.get("walk_min"),
-             r.get("station", "阿波座"),
-             r.get("age_years"), r.get("room_floor"), r.get("rent_yen"),
-             r.get("admin_yen"), r.get("total_yen"), r.get("shikikin_yen"),
-             r.get("reikin_yen"), r.get("layout"),
-             r.get("area_m2"), r.get("detail_url"),
-             r.get("equipment", ""), r.get("has_bathtub", -1),
-             r.get("no_bathtub_evidence", "")))
-        except Exception as e:
-            print("save error", e)
-    con.commit(); con.close()
-    try:
-        import migrate as _m
-        _m.migrate()
-        # stations補完(旧→新でwalkが落ちた分)
-        c2 = sqlite3.connect(DB)
-        n = 0
-        pcols = [c[1] for c in c2.execute("PRAGMA table_info(properties)")]
-        has_station_col = "station" in pcols
-        for bname, walk, floor, area, layout, stn in c2.execute(
-                "SELECT name,walk_min,room_floor,area_m2,layout,"
-                + ("station" if has_station_col else "'阿波座'")
-                + " FROM properties WHERE walk_min IS NOT NULL"):
-            nn = _m.norm_name(bname)
-            b = c2.execute("SELECT id FROM buildings WHERE norm_name=?", (nn,)).fetchone()
-            if not b:
-                continue
-            u = c2.execute("SELECT id FROM units WHERE building_id=? AND "
-                           "(floor IS ? OR floor=?) AND layout=? AND abs(area_m2-?)<=0.3",
-                           (b[0], floor, floor, layout, area or 0)).fetchone()
-            if u and not c2.execute(
-                    "SELECT 1 FROM stations WHERE unit_id=? AND name=?",
-                    (u[0], stn or "阿波座")).fetchone():
-                c2.execute("INSERT INTO stations(unit_id,name,walk_min) VALUES(?,?,?)",
-                           (u[0], stn or "阿波座", walk))
-                n += 1
-        c2.commit(); c2.close()
-        print(f"migrated to new schema (+{n} stations)")
-    except Exception as e:
-        print("migrate skip:", str(e)[:150])
+        if not r["url"]:
+            continue
+        bid = _get_or_create_building(con, r)
+        uid = _get_or_create_unit(con, bid, r)
+        _save_stations(con, uid, r["stations"], r["nearest"])
+        rent, admin = r["rent_yen"], r["admin_yen"]
+        total = (rent or 0) + (admin or 0)
+        row = con.execute("SELECT id FROM listings WHERE url=?",
+                          (r["url"],)).fetchone()
+        if row:
+            lid = row[0]
+            con.execute("UPDATE listings SET unit_id=?,rent_yen=?,admin_yen=?,"
+                        "shikikin=?,reikin=?,last_seen=datetime('now',"
+                        "'localtime'),active=1 WHERE id=?",
+                        (uid, rent, admin, str(r["shikikin_yen"]),
+                         str(r["reikin_yen"]), lid))
+        else:
+            con.execute(
+                "INSERT INTO listings(unit_id,site,url,rent_yen,admin_yen,"
+                "shikikin,reikin,last_seen,active) VALUES(?,?,?,?,?,?,?,"
+                "datetime('now','localtime'),1)",
+                (uid, "suumo", r["url"], rent, admin,
+                 str(r["shikikin_yen"]), str(r["reikin_yen"])))
+            lid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
+        con.execute("INSERT OR IGNORE INTO costs(listing_id,key_money_yen,"
+                    "deposit_yen,fetched) VALUES(?,?,?,0)",
+                    (lid, r["reikin_yen"], r["shikikin_yen"]))
+        con.execute(
+            "INSERT OR REPLACE INTO properties(name,address,station,walk_min,"
+            "age_years,room_floor,rent_yen,admin_yen,total_yen,shikikin_yen,"
+            "reikin_yen,layout,area_m2,direction,structure,floors,detail_url,"
+            "scraped_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+            "datetime('now','localtime'))",
+            (r["name"], r["address"], r["nearest"]["name"],
+             r["nearest"]["walk"], r["age_years"], r["floor"], rent, admin,
+             total, r["shikikin_yen"], r["reikin_yen"], r["layout"],
+             r["area_m2"], r.get("direction"), r.get("structure"),
+             r["floors"], r["url"]))
+        n += 1
+    con.commit()
+    con.close()
+    return n
+
 
 def main():
-    import argparse as ap_m
-    ap = ap_m.ArgumentParser()
+    ap = argparse.ArgumentParser()
     ap.add_argument("--max-pages", type=int, default=3)
-    ap.add_argument("--chinryo-max", type=int, default=10)
+    ap.add_argument("--chinryo-max", type=int, default=12)
     ap.add_argument("--stations", nargs="*", default=None,
-                    help="駅名の指定。省略時はconfig.yamlの全駅")
-    ap.add_argument("--detail", action="store_true")
-    ap.add_argument("--detail-limit", type=int, default=30)
+                    help="省略時は config.yaml の全駅")
+    ap.add_argument("--rebuild", action="store_true", help="全テーブル再作成")
+    ap.add_argument("--list-html", type=Path,
+                    help="保存済み一覧HTMLを解析(ネットワーク不要)")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--sleep", type=float, default=3.0,
+                    help="1ページ毎の待機秒(負荷軽減)")
+    ap.add_argument("--jitter", type=float, default=1.5,
+                    help="待機に加えるランダム幅(秒)")
     a = ap.parse_args()
-    init_db()
-    targets = a.stations or list(EK_CODES.keys())
-    all_rows = []
+
+    init_db(rebuild=a.rebuild)
+
+    if a.list_html:
+        rows = parse_list(BeautifulSoup(a.list_html.read_text(), "lxml"))
+        print(f"{a.list_html.name}: {len(rows)} rooms")
+        if not a.dry_run:
+            print("saved", save(rows))
+        return
+
+    targets = a.stations or list(EK_CODES)
+    total = 0
     for stn in targets:
         ek = EK_CODES.get(stn)
         if not ek:
             print(f"[skip] unknown station: {stn}")
             continue
-        for p in range(1, a.max_pages + 1):
-            url = list_url(p, a.chinryo_max, ek)
-            print(f"[list] {stn} p{p}: {url}")
+        for page in range(1, a.max_pages + 1):
+            url = list_url(page, ek, a.chinryo_max)
             try:
                 soup = fetch(url)
             except Exception as e:
-                print(" list fetch error:", str(e)[:100])
+                print(f"[list error] {stn} p{page}: {str(e)[:100]}")
                 break
-            rows = parse_list(soup, station=stn)
-            print(f"  -> {len(rows)} rooms")
+            rows = parse_list(soup, focus_station=stn)
+            print(f"[list] {stn} p{page}: {len(rows)} rooms")
             if not rows:
                 break
-            all_rows.extend(rows)
-            time.sleep(1.2)
-    if a.detail:
-        for r in all_rows[:a.detail_limit]:
-            if not r.get("detail_url"):
-                continue
-            eq, hb, ev = fetch_detail(r["detail_url"])
-            r["equipment"] = eq
-            r["has_bathtub"] = hb
-            r["no_bathtub_evidence"] = ev
-            print("  detail %s %s bath=%s" % (r["name"], r["rent_yen"], hb))
-    save(all_rows)
-    print("saved/fetched %d -> %s" % (len(all_rows), DB))
+            if not a.dry_run:
+                save(rows)
+            total += len(rows)
+            sleep_with_jitter(a.sleep, a.jitter)
+    print(f"done: {total} rooms -> {DB}")
+
 
 if __name__ == "__main__":
     main()
-
