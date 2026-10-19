@@ -44,6 +44,16 @@ def initialize_db(rebuild: bool = False) -> None:
         con.executescript(PROPERTIES_DDL)
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stations_uniq "
                     "ON stations(unit_id,name,line)")
+        # 再適用で重複しうる証跡/スナップショットを整理してから一意化
+        con.execute("DELETE FROM evidence WHERE id NOT IN (SELECT MIN(id) FROM"
+                    " evidence GROUP BY unit_id,url,method)")
+        con.execute("DELETE FROM listing_snapshots WHERE id NOT IN (SELECT"
+                    " MIN(id) FROM listing_snapshots"
+                    " GROUP BY listing_id,date(fetched_at))")
+        con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_uniq"
+                    " ON evidence(unit_id,url,method)")
+        con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshot_uniq"
+                    " ON listing_snapshots(listing_id,date(fetched_at))")
         columns = {row[1] for row in con.execute("PRAGMA table_info(properties)")}
         for name, kind in _PROPERTY_COLUMNS:
             if name not in columns:
