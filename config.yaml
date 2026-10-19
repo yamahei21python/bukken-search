@@ -1,6 +1,6 @@
 weights: {total: 30, tub: 20, transit: 15, size: 10, noise: 10, equip: 8, safety: 7}
 rules:
-  must_total_max: 80000
+  must_total_max: 100000
   tub_scores: {confirmed_no_tub: 20, likely_no_tub: 12, unknown: 0, likely_tub: 0, confirmed_tub: 0}
   transit_walk5: 8
   transit_walk10: 4

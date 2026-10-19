@@ -38,14 +38,14 @@ jobs:
           restore-keys: |
             bukken-db-
 
-      - name: List scrape (全駅)
-        run: python3 scraper.py --max-pages 3
+      - name: List scrape (全駅・10万以下)
+        run: python3 scraper.py --max-pages 4 --chinryo-max 10
 
       - name: Detail scrape (未取得のみ)
-        run: python3 detail_scraper.py --limit 80
+        run: python3 detail_scraper.py --limit 100
 
       - name: Rank
-        run: python3 rank.py --max-total 80000 --walk-max 10 | tee rank_out.txt
+        run: python3 rank.py --max-total 100000 --walk-max 10 | tee rank_out.txt
 
       - name: Notify (optional)
         if: ${{ env.HAS_WEBHOOK == 'true' }}

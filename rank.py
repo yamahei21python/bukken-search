@@ -5,7 +5,7 @@ from pathlib import Path
 from models import effective_monthly, total_2year, score_unit
 DB = Path(__file__).parent / "bukken.db"
 ap = argparse.ArgumentParser()
-ap.add_argument("--max-total", type=int, default=80000)
+ap.add_argument("--max-total", type=int, default=100000)
 ap.add_argument("--tub", nargs="*", default=["confirmed_no_tub", "likely_no_tub", "unknown"])
 ap.add_argument("--walk-max", type=int, default=10)
 ap.add_argument("--allow-unknown-walk", action="store_true",

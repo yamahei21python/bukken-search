@@ -6,7 +6,7 @@ import streamlit as st
 DB = Path(__file__).parent / "bukken.db"
 
 st.title("阿波座 賃貸選別")
-max_total = st.slider("総額上限(管理費込)", 50000, 100000, 80000, 5000)
+max_total = st.slider("総額上限(管理費込)", 50000, 150000, 100000, 5000)
 tub = st.multiselect("湯船状態", ["confirmed_no_tub", "likely_no_tub", "unknown",
                                   "likely_tub", "confirmed_tub"],
                      default=["confirmed_no_tub", "likely_no_tub", "unknown"])

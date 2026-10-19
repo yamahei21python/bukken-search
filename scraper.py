@@ -190,7 +190,7 @@ def main():
     import argparse as ap_m
     ap = ap_m.ArgumentParser()
     ap.add_argument("--max-pages", type=int, default=3)
-    ap.add_argument("--chinryo-max", type=int, default=7)
+    ap.add_argument("--chinryo-max", type=int, default=10)
     ap.add_argument("--stations", nargs="*", default=None,
                     help="駅名の指定。省略時はconfig.yamlの全駅")
     ap.add_argument("--detail", action="store_true")
