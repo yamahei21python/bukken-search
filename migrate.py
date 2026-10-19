@@ -3,7 +3,16 @@ import re
 import sqlite3
 import unicodedata
 from pathlib import Path
+import yaml
 DB = Path(__file__).parent / "bukken.db"
+CFG = yaml.safe_load(open(Path(__file__).parent / "config.yaml"))
+BUILDING_STRIP = CFG.get("building_name_strip_patterns", [])
+
+def strip_building_name(name):
+    clean = name
+    for pat in BUILDING_STRIP:
+        clean = re.sub(pat, "", clean).strip()
+    return clean or name
 
 def norm_name(s):
     if not s:
@@ -31,15 +40,15 @@ def migrate():
     con.executescript(open(Path(__file__).parent / "schema.sql").read())
     try:
         old = con.execute("SELECT name,address,walk_min,age_years,room_floor,"
-                          "rent_yen,admin_yen,layout,area_m2,detail_url,"
-                          "equipment,has_bathtub,no_bathtub_evidence "
+                          "rent_yen,admin_yen,shikikin_yen,reikin_yen,"
+                          "layout,area_m2,detail_url,equipment,has_bathtub,no_bathtub_evidence "
                           "FROM properties").fetchall()
     except Exception as e:
         print("no old table:", e)
         return
     n_b = n_u = n_l = 0
-    for (name, addr, walk, age, floor, rent, admin, layout,
-         area, url, equip, hb, ev) in old:
+    for (name, addr, walk, age, floor, rent, admin, shiki, rei,
+         layout, area, url, equip, hb, ev) in old:
         nn, na = norm_name(name), norm_addr(addr)
         if not nn:
             nn = (na + (layout or "") + str(area or ""))[:40] or "unknown"
@@ -47,7 +56,7 @@ def migrate():
                         (na, nn)).fetchone()
         if not b:
             con.execute("INSERT INTO buildings(norm_address,name,norm_name,age_years)"
-                        " VALUES(?,?,?,?)", (na, name, nn, age))
+                        " VALUES(?,?,?,?)", (na, strip_building_name(name), nn, age))
             n_b += 1
             b = con.execute("SELECT id FROM buildings WHERE norm_address=? AND norm_name=?",
                             (na, nn)).fetchone()
@@ -65,11 +74,22 @@ def migrate():
             u = con.execute("SELECT last_insert_rowid()").fetchone()
         uid = u[0]
         try:
-            con.execute("INSERT OR IGNORE INTO listings(unit_id,site,url,rent_yen,admin_yen)"
-                        " VALUES(?,'suumo',?,?,?)", (uid, url, rent, admin))
+            con.execute("INSERT OR REPLACE INTO listings(unit_id,site,url,rent_yen,admin_yen,shikikin,reikin)"
+                        " VALUES(?,'suumo',?,?,?,?,?)",
+                        (uid, url, rent, admin,
+                         str(shiki) if shiki is not None else "",
+                         str(rei) if rei is not None else ""))
             n_l += 1
         except Exception:
             pass
+        lid = con.execute("SELECT id FROM listings WHERE url=?", (url,)).fetchone()
+        if lid:
+            # costs に敷金・礼金を初期投入（一覧取得分）
+            try:
+                con.execute("INSERT OR REPLACE INTO costs(listing_id,key_money_yen,deposit_yen,fetched)"
+                            " VALUES(?,?,?,0)", (lid[0], rei or 0, shiki or 0))
+            except Exception:
+                pass
         if equip:
             for a in re.split(r"[、,]", equip[:2000]):
                 a = a.strip()[:40]

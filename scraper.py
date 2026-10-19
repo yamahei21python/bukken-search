@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS properties (
   name TEXT, address TEXT, walk_min INTEGER, station TEXT,
   age_years INTEGER, room_floor INTEGER,
   rent_yen INTEGER, admin_yen INTEGER, total_yen INTEGER,
+  shikikin_yen INTEGER, reikin_yen INTEGER,
   layout TEXT, area_m2 REAL,
   detail_url TEXT UNIQUE,
   equipment TEXT, has_bathtub INTEGER,
@@ -67,6 +68,9 @@ def parse_list(soup, station="阿波座"):
     for cassette in soup.select(".cassetteitem"):
         head = cassette.select_one(".cassetteitem_content-title")
         name = head.get_text(strip=True) if head else ""
+        # SUUMOカセットヘッダの「路線+駅+階建+築年」混入を除去
+        for pat in CFG.get("building_name_strip_patterns", []):
+            name = re.sub(pat, "", name).strip()
         addr = cassette.select_one(".cassetteitem_detail-col1")
         address = addr.get_text(" ", strip=True) if addr else ""
         dt = cassette.get_text(" ", strip=True)
@@ -92,6 +96,14 @@ def parse_list(soup, station="阿波座"):
                 ms = re.findall(r"([\d.]+万円|\d+円|-)", cols[1])
                 if len(ms) >= 2:
                     admin = parse_yen(ms[1])
+            # 敷金/礼金（cols[2] 例: "9.3万円 11.8万円" / "- 9.3万円"）
+            shiki = rei = None
+            if len(cols) > 2:
+                sm = re.findall(r"([\d.]+万円|\d+円|-)", cols[2])
+                if len(sm) >= 1:
+                    shiki = parse_yen(sm[0])
+                if len(sm) >= 2:
+                    rei = parse_yen(sm[1])
             lm = re.search(r"(ワンルーム|\d[SLDK]+)", " ".join(cols))
             layout = lm.group(1) if lm else ""
             am = re.search(r"([\d.]+)m", " ".join(cols))
@@ -100,6 +112,7 @@ def parse_list(soup, station="阿波座"):
                             station=station,
                             age_years=age, room_floor=fl, rent_yen=rent,
                             admin_yen=admin, total_yen=(rent or 0) + (admin or 0),
+                            shikikin_yen=shiki, reikin_yen=rei,
                             layout=layout, area_m2=area, detail_url=durl))
     return out
 
@@ -141,15 +154,16 @@ def save(rows):
     con = sqlite3.connect(DB)
     for r in rows:
         try:
-            con.execute("""INSERT OR IGNORE INTO properties
+            con.execute("""INSERT OR REPLACE INTO properties
             (name,address,walk_min,station,age_years,room_floor,rent_yen,
-             admin_yen,total_yen,layout,area_m2,detail_url,
+             admin_yen,total_yen,shikikin_yen,reikin_yen,layout,area_m2,detail_url,
              equipment,has_bathtub,no_bathtub_evidence)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (r.get("name"), r.get("address"), r.get("walk_min"),
              r.get("station", "阿波座"),
              r.get("age_years"), r.get("room_floor"), r.get("rent_yen"),
-             r.get("admin_yen"), r.get("total_yen"), r.get("layout"),
+             r.get("admin_yen"), r.get("total_yen"), r.get("shikikin_yen"),
+             r.get("reikin_yen"), r.get("layout"),
              r.get("area_m2"), r.get("detail_url"),
              r.get("equipment", ""), r.get("has_bathtub", -1),
              r.get("no_bathtub_evidence", "")))
