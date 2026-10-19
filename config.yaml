@@ -1,0 +1,25 @@
+weights: {total: 30, tub: 20, transit: 15, size: 10, noise: 10, equip: 8, safety: 7}
+rules:
+  must_total_max: 80000
+  tub_scores: {confirmed_no_tub: 20, likely_no_tub: 12, unknown: 0, likely_tub: 0, confirmed_tub: 0}
+  transit_walk5: 8
+  transit_walk10: 4
+  area20: 5
+  free_net: 4
+  washstand: 4
+  highway100: -10
+  road50: -10
+  penalty_1f: -5
+  penalty_short_cancel2m: -10
+  missing_info: -5
+tub:
+  exclude_keywords: [シャワー付洗面台, シャワー付き洗面台]
+  confirmed_no: [シャワーのみ, シャワーブースのみ, バスなし, 浴室なし, 湯船なし, シャワールームのみ]
+  likely_no: [シャワールーム, シャワーブース]
+  confirmed_yes: [浴槽, 湯船, 追い焚, 追焚, バスタブ, ユニットバス, オートバス]
+  likely_yes: [バストイレ別, バス・トイレ別, 浴室乾燥]
+stations: [阿波座, 西長堀, 本町, 九条, 玉川, 西大橋, 肥後橋, 淀屋橋]
+# SUUMO駅コード。取得時はタイトルで駅名を検証する
+ek_codes: {阿波座: ek_01690, 西長堀: ek_29130, 本町: ek_35470, 九条: ek_12600,
+           玉川: ek_23440, 西大橋: ek_28460, 肥後橋: ek_32690, 淀屋橋: ek_41200}
+notify: {webhook_env: DISCORD_WEBHOOK, top_score: 60}

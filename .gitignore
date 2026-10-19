@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.log
+*.db-wal
+*.db-shm
+bukken_backup.db
+rank_out.txt
+.DS_Store
