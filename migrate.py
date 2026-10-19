@@ -50,6 +50,7 @@ def migrate():
     for (name, addr, walk, age, floor, rent, admin, shiki, rei,
          layout, area, url, equip, hb, ev) in old:
         nn, na = norm_name(name), norm_addr(addr)
+        nn = strip_building_name(nn)
         if not nn:
             nn = (na + (layout or "") + str(area or ""))[:40] or "unknown"
         b = con.execute("SELECT id FROM buildings WHERE norm_address=? AND norm_name=?",
