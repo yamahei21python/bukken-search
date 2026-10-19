@@ -34,10 +34,11 @@ CREATE TABLE IF NOT EXISTS properties (
 def init_db():
     con = sqlite3.connect(DB)
     con.executescript(SCHEMA)
-    # 既存DBにstation列が無い場合の追加
+    # 既存DBのカラム追加（station / shikikin_yen / reikin_yen）
     cols = [c[1] for c in con.execute("PRAGMA table_info(properties)")]
-    if "station" not in cols:
-        con.execute("ALTER TABLE properties ADD COLUMN station TEXT")
+    for col, typ in [("station", "TEXT"), ("shikikin_yen", "INTEGER"), ("reikin_yen", "INTEGER")]:
+        if col not in cols:
+            con.execute(f"ALTER TABLE properties ADD COLUMN {col} {typ}")
     con.commit(); con.close()
 
 def parse_yen(s):
