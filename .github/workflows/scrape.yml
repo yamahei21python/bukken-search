@@ -8,7 +8,7 @@ on:
     inputs:
       max_pages:
         description: "一覧の最大ページ数/駅"
-        default: "50"
+        default: "70"
       chinryo_max:
         description: "賃料上限(万円)"
         default: "10"
@@ -44,7 +44,7 @@ jobs:
     # GHA の上限は 360 分。詳細側は --max-seconds で先に止める。
     timeout-minutes: 355
     env:
-      MAX_PAGES: ${{ github.event.inputs.max_pages || '50' }}
+      MAX_PAGES: ${{ github.event.inputs.max_pages || '70' }}
       CHINRYO_MAX: ${{ github.event.inputs.chinryo_max || '10' }}
       LIST_SLEEP: ${{ github.event.inputs.list_sleep || '3' }}
       LIST_JITTER: ${{ github.event.inputs.list_jitter || '1.5' }}
@@ -81,6 +81,7 @@ jobs:
 
       - name: List scrape (全駅・低負荷)
         # 負荷軽減: 1ページ毎に sleep + jitter。長く回して多く取る。
+        # max-pages 70: 実測63ページの本町を含む最長駅まで網羅するため。
         run: |
           python3 scraper.py \
             --max-pages "$MAX_PAGES" \
