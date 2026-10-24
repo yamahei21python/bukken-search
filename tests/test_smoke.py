@@ -134,5 +134,17 @@ class TestSavePreservesDetail(unittest.TestCase):
         self.assertEqual(walk, 4)
 
 
+class TestTimestampsUtc(unittest.TestCase):
+    """DB時刻は UTC 統一（'localtime' を使うと実行環境でずれる）。"""
+
+    def test_no_localtime_in_sql(self):
+        root = Path(__file__).parent.parent
+        offenders = []
+        for f in list(root.glob("*.py")) + list(root.glob("*.sql")):
+            if "localtime" in f.read_text(encoding="utf-8"):
+                offenders.append(f.name)
+        self.assertEqual(offenders, [])
+
+
 if __name__ == "__main__":
     unittest.main()
