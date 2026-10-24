@@ -13,7 +13,6 @@
   python3 scraper.py --list-html path/to/list.html     # 保存済みHTMLを解析(オフライン)
 """
 import argparse
-import time
 from pathlib import Path
 
 import yaml
@@ -132,15 +131,15 @@ def save(rows):
         if row:
             lid = row[0]
             con.execute("UPDATE listings SET unit_id=?,rent_yen=?,admin_yen=?,"
-                        "shikikin=?,reikin=?,last_seen=datetime('now',"
-                        "'localtime'),active=1 WHERE id=?",
+                        "shikikin=?,reikin=?,last_seen=datetime('now'),"
+                        "active=1 WHERE id=?",
                         (uid, rent, admin, str(r["shikikin_yen"]),
                          str(r["reikin_yen"]), lid))
         else:
             con.execute(
                 "INSERT INTO listings(unit_id,site,url,rent_yen,admin_yen,"
                 "shikikin,reikin,last_seen,active) VALUES(?,?,?,?,?,?,?,"
-                "datetime('now','localtime'),1)",
+                "datetime('now'),1)",
                 (uid, "suumo", r["url"], rent, admin,
                  str(r["shikikin_yen"]), str(r["reikin_yen"])))
             lid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -155,7 +154,7 @@ def save(rows):
             "age_years,room_floor,rent_yen,admin_yen,total_yen,shikikin_yen,"
             "reikin_yen,layout,area_m2,direction,structure,floors,detail_url,"
             "scraped_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-            "datetime('now','localtime'))"
+            "datetime('now'))"
             " ON CONFLICT(detail_url) DO UPDATE SET"
             " name=excluded.name,address=excluded.address,"
             # 徒歩は「最寄り」なので小さい方を残す（詳細で判明した
@@ -199,7 +198,7 @@ def deactivate_stale(days=7):
     con = connect_db()
     cur = con.execute(
         "UPDATE listings SET active=0 WHERE active=1"
-        " AND last_seen < datetime('now','localtime',?)",
+        " AND last_seen < datetime('now',?)",
         (f"-{days} days",))
     con.commit()
     n = cur.rowcount
