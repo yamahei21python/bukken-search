@@ -140,6 +140,25 @@ def save(rows):
     return n
 
 
+def deactivate_stale(days=7):
+    """一定日数見ていない listings を active=0 にする。
+
+    従来は active=0 への遷移が無く、募集終了した物件が母集団に
+    残り続けて割安判定を汚していた。再び一覧に現れれば save() が
+    active=1 に戻す。全駅を回す通常実行のときだけ呼ぶこと
+    （一部駅だけの実行で他駅の物件を落とさないため）。
+    """
+    con = connect_db()
+    cur = con.execute(
+        "UPDATE listings SET active=0 WHERE active=1"
+        " AND last_seen < datetime('now','localtime',?)",
+        (f"-{days} days",))
+    con.commit()
+    n = cur.rowcount
+    con.close()
+    return n
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-pages", type=int, default=3)
@@ -154,6 +173,9 @@ def main():
                     help="1ページ毎の待機秒(負荷軽減)")
     ap.add_argument("--jitter", type=float, default=1.5,
                     help="待機に加えるランダム幅(秒)")
+    ap.add_argument("--stale-days", type=int, default=7,
+                    help="この日数見ていない listings を active=0 にする"
+                         "（全駅実行時のみ）")
     a = ap.parse_args()
 
     init_db(rebuild=a.rebuild)
@@ -187,6 +209,9 @@ def main():
                 save(rows)
             total += len(rows)
             sleep_with_jitter(a.sleep, a.jitter)
+    if not a.dry_run and not a.stations:
+        n = deactivate_stale(a.stale_days)
+        print(f"deactivated stale listings: {n} (>{a.stale_days} days)")
     print(f"done: {total} rooms -> {DB}")
 
 
