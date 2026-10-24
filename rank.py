@@ -15,9 +15,9 @@ a = ap.parse_args()
 con = sqlite3.connect(DB)
 con.row_factory = sqlite3.Row
 rows = con.execute(
-    """SELECT b.name, b.norm_address, l.rent_yen rent, l.admin_yen admin,
+    """SELECT b.name, b.norm_address, b.autolock, l.rent_yen rent, l.admin_yen admin,
        u.layout, u.area_m2 area, u.floor, u.tub_status,
-       (SELECT walk_min FROM stations s WHERE s.unit_id=u.id LIMIT 1) walk_min,
+       (SELECT MIN(walk_min) FROM stations s WHERE s.unit_id=u.id) walk_min,
        c.water_fixed_yen water, c.support_yen sup, c.guarantee_renew_yen gren,
        c.renewal_fee_yen rf, c.contract_months cm,
        c.key_money_yen km, c.deposit_yen dep, c.agency_yen ag,
@@ -55,6 +55,7 @@ for r in rows:
     sc, reasons = score_unit(dict(total=total, tub_status=r["tub_status"],
                                   walk_min=r["walk_min"], area=r["area"],
                                   floor=r["floor"], equip=r["equip"] or "",
+                                  autolock=bool(r["autolock"]),
                                   missing=missing))
     hits.append((sc, eff, dict(r) | {"total": total, "t2": t2,
                                      "init": init_total, "reasons": reasons,
