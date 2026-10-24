@@ -153,6 +153,8 @@ def parse_total_floors(text):
     """建物の総階数テキスト (例 '10階建', '地上12階地下1階') から総階数を取る。"""
     if not isinstance(text, str):
         return np.nan
+    if text.strip().isdigit():
+        return float(text.strip())  # buildings.floors は '10' 等の数値文字列
     m = re.search(r"(\d+)\s*階建", text)
     if m:
         return float(m.group(1))
