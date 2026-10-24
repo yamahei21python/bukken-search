@@ -62,7 +62,14 @@ def to_yen(tok):
 
 def money_pair(cell):
     """一覧セル '9.3万円 10000円' / '- 9.3万円' を (第一, 第二) へ。"""
-    tokens = [p for p in re.split(r"\s+", nfkc(cell).strip()) if p]
+    text = nfkc(cell)
+    if "～" in text or "〜" in text or "~" in text:
+        # 範囲表記 '8.5万円～9万円' は単一項目の幅。第二値を
+        # 管理費などと誤認しないよう第一値だけを返す
+        vals = [to_yen(x) for x in re.findall(
+            r"[\d,]+(?:\.\d+)?\s*(?:万円|円)", text)]
+        return (vals[0] if vals else None), None
+    tokens = [p for p in re.split(r"\s+", text.strip()) if p]
     if len(tokens) >= 2:
         vals = [to_yen(t) for t in tokens]
         return vals[0], vals[1]
@@ -134,7 +141,10 @@ def parse_list(soup, focus_station=""):
 
         stations = parse_stations(det)
         if stations:
-            nearest = min(stations, key=lambda s: s["walk"])
+            # walk が取れない駅があると比較で落ちるため不明は末尾扱い
+            nearest = min(stations,
+                          key=lambda s: s["walk"] if s["walk"] is not None
+                          else 9999)
         else:
             nearest = {"line": "", "name": focus_station, "walk": None}
         age = _int(re.search(r"築(\d+)年", det)) \
