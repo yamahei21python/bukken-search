@@ -105,6 +105,25 @@ class TestParseDetail(unittest.TestCase):
         self.assertIsNone(d["support_yen"])
         self.assertEqual(d["key_exchange_yen"], 27500)
 
+    def _with_contract(self, contract, rent_line="7万円\n管理費: 5000円\n"):
+        return ("<html><body><div class='property_view_note-info'>\n"
+                + rent_line + "</div>"
+                "<table class='table_gaiyou'><tr><th>契約期間</th>"
+                f"<td>{contract}</td></tr></table></body></html>")
+
+    def test_contract_not_calendar_year(self):
+        # 定期借家の期限（西暦）を契約期間と誤認しない
+        d = parse_detail(BeautifulSoup(
+            self._with_contract("2028年3月末まで"), "lxml"))
+        self.assertIsNone(d["contract_months"])
+
+    def test_renewal_ratio_and_months(self):
+        # 比率表記の更新料（新賃料の1ヶ月分）を家賃から換算する
+        d = parse_detail(BeautifulSoup(
+            self._with_contract("2年 更新料: 新賃料の1ヶ月分"), "lxml"))
+        self.assertEqual(d["contract_months"], 24)
+        self.assertEqual(d["renewal_fee_yen"], 70000)
+
 
 class TestScore(unittest.TestCase):
     def test_score_uses_config(self):
@@ -179,6 +198,28 @@ class TestSavePreservesDetail(unittest.TestCase):
         self.assertIsNotNone(hb)
         # 詳細側の徒歩（4分）が properties にも反映される
         self.assertEqual(walk, 4)
+
+    def test_shikikin_none_is_null(self):
+        # 敷金・礼金が未取得のとき、文字列 'None' でなく NULL が入る
+        import db as db_mod
+        import scraper
+        row = {"name": "テスト2", "address": "大阪市西区立売堀3",
+               "age_years": 10, "floors": 5, "structure": "鉄筋系",
+               "area_m2": 25.0, "layout": "1K", "floor": 3,
+               "direction": None, "rent_yen": 80000, "admin_yen": 5000,
+               "shikikin_yen": None, "reikin_yen": None,
+               "url": "https://suumo.jp/chintai/jnc_000999999998/",
+               "stations": [{"line": "地下鉄中央線", "name": "阿波座",
+                             "walk": 5}],
+               "nearest": {"line": "地下鉄中央線", "name": "阿波座",
+                           "walk": 5}}
+        scraper.save([row])
+        con = db_mod.connect_db()
+        shiki, rei = con.execute(
+            "SELECT shikikin, reikin FROM listings").fetchone()
+        con.close()
+        self.assertIsNone(shiki)
+        self.assertIsNone(rei)
 
 
 class TestTimestampsUtc(unittest.TestCase):
