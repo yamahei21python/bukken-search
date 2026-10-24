@@ -16,11 +16,11 @@ CREATE TABLE IF NOT EXISTS listings(
  unit_id INTEGER REFERENCES units(id),
  site TEXT, url TEXT UNIQUE, rent_yen INTEGER, admin_yen INTEGER,
  shikikin TEXT, reikin TEXT, agent TEXT,
- first_seen TEXT DEFAULT (datetime('now','localtime')),
- last_seen TEXT DEFAULT (datetime('now','localtime')), active INTEGER DEFAULT 1);
+ first_seen TEXT DEFAULT (datetime('now')),
+ last_seen TEXT DEFAULT (datetime('now')), active INTEGER DEFAULT 1);
 CREATE TABLE IF NOT EXISTS listing_snapshots(
  id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER REFERENCES listings(id),
- fetched_at TEXT DEFAULT (datetime('now','localtime')),
+ fetched_at TEXT DEFAULT (datetime('now')),
  rent_yen INTEGER, admin_yen INTEGER, active INTEGER, equip_text TEXT);
 CREATE TABLE IF NOT EXISTS costs(
  listing_id INTEGER PRIMARY KEY REFERENCES listings(id),
@@ -39,17 +39,17 @@ CREATE TABLE IF NOT EXISTS evidence(
  id INTEGER PRIMARY KEY AUTOINCREMENT, unit_id INTEGER REFERENCES units(id),
  tub_status TEXT, quote TEXT, url TEXT, photo_url TEXT,
  method TEXT, confidence REAL,
- checked_at TEXT DEFAULT (datetime('now','localtime')));
+ checked_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS favorites(unit_id INTEGER PRIMARY KEY REFERENCES units(id),
- memo TEXT, created_at TEXT DEFAULT (datetime('now','localtime')));
+ memo TEXT, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS viewings(
  id INTEGER PRIMARY KEY AUTOINCREMENT, unit_id INTEGER REFERENCES units(id),
  viewed_on TEXT, score INTEGER, memo TEXT);
 CREATE TABLE IF NOT EXISTS contacts(
  id INTEGER PRIMARY KEY AUTOINCREMENT, unit_id INTEGER REFERENCES units(id),
- contacted_on TEXT DEFAULT (datetime('now','localtime')),
+ contacted_on TEXT DEFAULT (datetime('now')),
  question TEXT, answer TEXT, agent TEXT);
 CREATE TABLE IF NOT EXISTS notifications(
  id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER REFERENCES listings(id),
  kind TEXT, message TEXT,
- created_at TEXT DEFAULT (datetime('now','localtime')));
+ created_at TEXT DEFAULT (datetime('now')));
