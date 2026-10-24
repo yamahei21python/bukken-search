@@ -148,6 +148,10 @@ def parse_list(soup, focus_station=""):
                 return cells[i] if i < len(cells) else ""
 
             rent, admin = money_pair(cell(3))
+            if rent and admin and admin > rent:
+                # 管理費が家賃を超えるのはセル誤読（実DBで8件確認）。
+                # 総額が約2倍になり rank/app から消えるため欠落扱いにする。
+                admin = None
             shiki, rei = money_pair(cell(4))
             layout = ""
             ml = _LAYOUT_RE.search(cell(5))
@@ -292,6 +296,16 @@ def parse_detail(soup):
                      if x.strip()]:
             if line.startswith("管理費") or line.startswith("共益費"):
                 price["admin"] = to_yen(line.split(":", 1)[-1])
+            elif line.startswith(("敷金/礼金", "礼金/敷金")):
+                # 合算表記「敷金/礼金: -/8.5万円」は / の前後で分ける。
+                # 丸ごと to_yen すると礼金を敷金として取り違える。
+                parts = line.split(":", 1)[-1].split("/")
+                first = to_yen(parts[0])
+                second = to_yen(parts[1]) if len(parts) > 1 else None
+                if line.startswith("敷金"):
+                    price["deposit"], price["key_money"] = first, second
+                else:
+                    price["key_money"], price["deposit"] = first, second
             elif line.startswith("敷金"):
                 price["deposit"] = to_yen(line.split(":", 1)[-1])
             elif line.startswith("礼金"):
@@ -321,10 +335,13 @@ def parse_detail(soup):
     guarantee_renew_yen = _find_yen(g.get("保証会社") or "", r"更新料")
     renewal_fee_yen = _find_yen(contract, r"更新料") \
         or _find_yen(other, r"更新手数料")
+    admin = price["admin"]
+    if rent and admin and admin > rent:
+        admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
 
     return {
         "rent_yen": rent,
-        "admin_yen": price["admin"],
+        "admin_yen": admin,
         "deposit_yen": price["deposit"],
         "key_money_yen": price["key_money"],
         "hoshoukin_yen": price["hoshoukin"],
