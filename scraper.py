@@ -54,9 +54,20 @@ def fetch(url: str, retry: int = 3) -> BeautifulSoup:
     return fetch_soup(url, retry=retry, retry_delay=5)
 
 
+def _is_descriptive_name(name):
+    """SUUMO見出しの「路線 駅 階建 築年」説明名かどうか。"""
+    n = name or ""
+    return "駅" in n and ("階建" in n or "築" in n)
+
+
 def _get_or_create_building(con, r):
     na = normalize_address(r["address"])
     nn = normalize_building_name(r["name"]) or r["name"]
+    if _is_descriptive_name(r["name"]):
+        # 説明名は除去パターンをすり抜ける表記ゆれ（大阪メトロ表記、
+        # 地下1地上〜階建、新築など）で同一建物が分裂するため、
+        # 住所+階建+築年 の合成キーを照合キーにする
+        nn = f"__desc__|{r['floors']}|{r['age_years']}"
     row = con.execute("SELECT id,age_years,structure,floors FROM buildings"
                       " WHERE norm_address=? AND norm_name=?", (na, nn)).fetchone()
     if row:
@@ -77,8 +88,11 @@ def _get_or_create_unit(con, bid, r):
         return None
     row = con.execute(
         "SELECT id FROM units WHERE building_id=? AND layout=? "
-        "AND abs(area_m2-?)<=0.3 AND (floor IS ? OR floor=?)",
-        (bid, r["layout"], r["area_m2"], r["floor"], r["floor"])).fetchone()
+        "AND abs(area_m2-?)<=0.3 AND (floor IS ? OR floor=?)"
+        " AND (direction IS ? OR direction=? OR ? IS NULL)",
+        (bid, r["layout"], r["area_m2"], r["floor"], r["floor"],
+         r.get("direction"), r.get("direction"),
+         r.get("direction"))).fetchone()
     if row:
         return row[0]
     con.execute("INSERT INTO units(building_id,floor,area_m2,layout,direction)"
@@ -144,7 +158,17 @@ def save(rows):
             "datetime('now','localtime'))"
             " ON CONFLICT(detail_url) DO UPDATE SET"
             " name=excluded.name,address=excluded.address,"
-            " station=excluded.station,walk_min=excluded.walk_min,"
+            # 徒歩は「最寄り」なので小さい方を残す（詳細で判明した
+            # より正確な徒歩を、一覧の粗い値で戻さないため）
+            " station=CASE WHEN excluded.walk_min IS NOT NULL"
+            " AND (properties.walk_min IS NULL"
+            " OR excluded.walk_min<properties.walk_min)"
+            " THEN excluded.station ELSE properties.station END,"
+            " walk_min=CASE WHEN excluded.walk_min IS NULL"
+            " THEN properties.walk_min"
+            " WHEN properties.walk_min IS NULL THEN excluded.walk_min"
+            " WHEN excluded.walk_min<properties.walk_min"
+            " THEN excluded.walk_min ELSE properties.walk_min END,"
             " age_years=excluded.age_years,room_floor=excluded.room_floor,"
             " rent_yen=excluded.rent_yen,admin_yen=excluded.admin_yen,"
             " total_yen=excluded.total_yen,"
