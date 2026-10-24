@@ -45,9 +45,10 @@ SELECT p.id, p.name, p.station, p.address, p.walk_min, p.age_years,
        c.guarantee_first_yen, c.guarantee_renew_yen, c.insurance_yen,
        c.key_exchange_yen, c.cleaning_yen, c.support_yen,
        c.water_fixed_yen, c.renewal_fee_yen, c.contract_months,
-       c.free_rent_months
+       c.free_rent_months, u.building_id
 FROM properties p
 JOIN listings l ON l.url = p.detail_url
+LEFT JOIN units u ON u.id = l.unit_id
 LEFT JOIN costs c ON c.listing_id = l.id
 """
 
@@ -77,7 +78,8 @@ def audit(df):
                                   | (df.station == "")).sum()),
         "area_lt12_n": int((df.area_m2 < 12).sum()),
         "area_gt110_n": int((df.area_m2 > 110).sum()),
-        "bath_unknown_n": int((df.has_bathtub == -1).sum()),
+        "bath_unknown_n": int(((df.has_bathtub == -1)
+                               | df.has_bathtub.isna()).sum()),
         "equipment_empty_n": int((df.equipment.isna()
                                   | (df.equipment == "")).sum()),
     }
@@ -102,14 +104,14 @@ def clean(df):
     df["station"] = (df.station.fillna("NA").replace("", "NA"))
     df["layout"] = df.layout.replace(LAYOUT_MAP)
     df["layout"] = df.layout.fillna("NA")
-    df["age_years"] = df.age_years.clip(0, 45)
+    df["age_years"] = df.age_years.clip(0, 60)
     df["room_floor"] = df.room_floor.clip(1, 30)
     return df
 
 
 def scope(df, a):
     m = (
-        df.total_yen.between(45000, a.max_total)
+        df.total_yen.between(getattr(a, "min_total", 45000), a.max_total)
         & df.area_m2.between(a.min_area, a.max_area)
         & df.walk_min.between(0, a.walk_max)
         & (df.station != "NA")
@@ -163,8 +165,15 @@ def fit_fair(df, alpha):
     """
     X = build_features(df)
     y = np.log(df.total_yen.values)
-    groups = df.name.values
-    n_groups = df.name.nunique()
+    # グループは建物IDを使う。物件名文字列だと同一建物が別名で
+    # 学習/検証に漏れ、逆に無関係な建物が同じ説明名で混ざる
+    if "building_id" in df.columns:
+        groups = np.array([
+            f"b{int(b)}" if pd.notna(b) else f"n{n}"
+            for b, n in zip(df["building_id"], df["name"])])
+    else:
+        groups = df.name.values
+    n_groups = len(set(groups))
 
     if n_groups >= 2:
         cv_pred = np.zeros(len(df))
@@ -205,7 +214,8 @@ def total_2year(r):
     return (r.total_yen * 24 + nonrefund_total(r) + value_or_zero(r.deposit_yen)
             + value_or_zero(r.renewal_fee_yen)
             + value_or_zero(r.guarantee_renew_yen) * 2
-            - r.total_yen * value_or_zero(r.free_rent_months))
+            # フリーレント控除は models.total_2year と同じく家賃分のみ
+            - r.rent_yen * value_or_zero(r.free_rent_months))
 
 
 def rank(df, fair, meta, a):
@@ -246,6 +256,8 @@ def main():
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--min-disc", type=float, default=0.0, dest="min_disc")
     ap.add_argument("--max-total", type=int, default=300000, dest="max_total")
+    ap.add_argument("--min-total", type=int, default=45000, dest="min_total",
+                    help="母集団の総額下限（従来は 45000 で固定だった）")
     ap.add_argument("--min-area", type=float, default=12, dest="min_area")
     ap.add_argument("--max-area", type=float, default=110, dest="max_area")
     ap.add_argument("--walk-max", type=int, default=15, dest="walk_max")
