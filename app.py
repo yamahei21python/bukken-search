@@ -13,7 +13,7 @@ tub = st.multiselect("湯船状態", ["confirmed_no_tub", "likely_no_tub", "unkn
 con = sqlite3.connect(DB)
 try:
     df = pd.read_sql_query(
-        """SELECT b.name, l.rent_yen, l.admin_yen, l.rent_yen+l.admin_yen total,
+        """SELECT b.name, l.rent_yen, l.admin_yen, l.rent_yen+COALESCE(l.admin_yen,0) total,
            u.layout, u.area_m2, u.floor, u.tub_status, l.url,
            (SELECT MIN(walk_min) FROM stations s WHERE s.unit_id=u.id) walk_min,
            (SELECT quote FROM evidence e WHERE e.unit_id=u.id ORDER BY e.checked_at DESC LIMIT 1) evidence
