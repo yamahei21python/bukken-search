@@ -40,14 +40,15 @@ QUERY = """
 SELECT p.id, p.name, p.station, p.address, p.walk_min, p.age_years,
        p.room_floor, p.rent_yen, p.admin_yen, p.total_yen, p.layout,
        p.area_m2, p.has_bathtub, p.equipment, p.detail_url,
+       l.active AS listing_active, l.last_seen AS last_seen,
        c.fetched, c.key_money_yen, c.deposit_yen, c.agency_yen,
        c.guarantee_first_yen, c.guarantee_renew_yen, c.insurance_yen,
        c.key_exchange_yen, c.cleaning_yen, c.support_yen,
        c.water_fixed_yen, c.renewal_fee_yen, c.contract_months,
        c.free_rent_months
 FROM properties p
-LEFT JOIN costs c
-  ON c.listing_id = (SELECT id FROM listings WHERE url = p.detail_url)
+JOIN listings l ON l.url = p.detail_url
+LEFT JOIN costs c ON c.listing_id = l.id
 """
 
 
@@ -113,6 +114,14 @@ def scope(df, a):
         & df.walk_min.between(0, a.walk_max)
         & (df.station != "NA")
     )
+    # 募集終了・陳腐化した物件を母集団から外す（従来は properties の
+    # 全行が対象で、終了物件が「割安」に混ざっていた）
+    if "listing_active" in df.columns:
+        m &= df.listing_active.fillna(0).astype(int) == 1
+    if a.max_age_days and "last_seen" in df.columns:
+        seen = pd.to_datetime(df.last_seen, errors="coerce")
+        cutoff = pd.Timestamp.now() - pd.Timedelta(days=a.max_age_days)
+        m &= seen.isna() | (seen >= cutoff)
     if a.layout:
         m &= df.layout.isin(a.layout)
     if a.station:
@@ -129,7 +138,21 @@ def build_features(df):
     X["age"] = df.age_years
     X["walk"] = df.walk_min
     X["floor"] = df.room_floor
-    return X.astype(float)
+    # 湯船の有無は賃料に効く。特徴に入れないと「湯船なし物件は
+    # 構造的に安い」分まで割安と誤認する（このDBの主目的が
+    # 湯船なし探しなので特に重要）
+    hb = pd.to_numeric(df.get("has_bathtub"), errors="coerce")
+    X["no_tub"] = (hb == 0).astype(float)
+    X["has_tub"] = (hb == 1).astype(float)
+    X = X.astype(float)
+    # 築年数・階数などは欠落が普通にある。NaN のままだと Ridge が
+    # 例外で落ちて cost_perf 自体が動かない（実DBで発生）。
+    # 中央値で補完し、欠落自体も特徴として残す。
+    for col in ("area", "age", "walk", "floor"):
+        if col in X.columns:
+            X[col + "_missing"] = X[col].isna().astype(float)
+            X[col] = X[col].fillna(X[col].median())
+    return X.fillna(0.0)
 
 
 def fit_fair(df, alpha):
@@ -226,6 +249,9 @@ def main():
     ap.add_argument("--min-area", type=float, default=12, dest="min_area")
     ap.add_argument("--max-area", type=float, default=110, dest="max_area")
     ap.add_argument("--walk-max", type=int, default=15, dest="walk_max")
+    ap.add_argument("--max-age-days", type=int, default=14, dest="max_age_days",
+                    help="last_seen がこの日数より古い物件を母集団から"
+                         "外す (0=無制限)")
     ap.add_argument("--layout", nargs="*")
     ap.add_argument("--station", nargs="*")
     ap.add_argument("--no-tub", action="store_true", dest="no_tub")
@@ -262,7 +288,10 @@ def main():
                          ensure_ascii=False, default=float, indent=2))
         return
 
-    print(f"母数{len(df)}件 / モデル CV R2={meta['r2']:.3f} "
+    n_fetched = int((df.fetched.fillna(0).astype(int) == 1).sum()) \
+        if "fetched" in df.columns else 0
+    print(f"母数{len(df)}件 (詳細取得済み {n_fetched}件"
+          f"={n_fetched / len(df):.0%}) / モデル CV R2={meta['r2']:.3f} "
           f"MAE={meta['mae_yen']:.0f}円 / ヒット{len(hits)}件 "
           f"(!は要データ確認の外れ値)")
     for _, row in hits.iterrows():
