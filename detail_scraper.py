@@ -94,8 +94,10 @@ def apply_detail(con, lid, uid, url, d):
     con.execute("UPDATE listings SET rent_yen=COALESCE(?,rent_yen),"
                 " admin_yen=COALESCE(?,admin_yen), shikikin=?, reikin=?,"
                 " last_seen=datetime('now') WHERE id=?",
-                (d["rent_yen"], d["admin_yen"], str(d["deposit_yen"]),
-                 str(d["key_money_yen"]), lid))
+                (d["rent_yen"], d["admin_yen"],
+                 None if d["deposit_yen"] is None else str(d["deposit_yen"]),
+                 None if d["key_money_yen"] is None else str(d["key_money_yen"]),
+                 lid))
     # 注意: 7054c2e でこの UPDATE が壊れていた（存在しないキー
     # shikikin_yen/reikin_yen を参照し KeyError、placeholder 数も不一致、
     # WHERE id=listings.id で別物件を更新しうる）。parse_detail の
@@ -119,6 +121,11 @@ def apply_detail(con, lid, uid, url, d):
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
                 (status, conf, d["direction"], uid))
+    # バスタブは部屋（ユニット）の属性なので、同一ユニットの別掲載
+    # （他仲介 listings に紐づく properties）にも同じ判定を伝える。
+    # 従来は掲載ごとに判定が食い違い、参照先で割れていた（61件）。
+    con.execute("UPDATE properties SET has_bathtub=? WHERE detail_url IN"
+                " (SELECT url FROM listings WHERE unit_id=?)", (hb, uid))
     # 詳細側の駅情報を stations へマージする（従来は parse しても
     # 捨てていた）。詳細の徒歩は一覧より正確なことが多く、一覧に
     # 無い駅も拾える。詳細値を正として既存行も更新する。
@@ -155,7 +162,21 @@ def apply_detail(con, lid, uid, url, d):
             sets = ",".join(f"{k}=?" for k in bflags)
             con.execute(f"UPDATE buildings SET {sets} WHERE id=?",
                         (*bflags.values(), bid[0]))
-    if "角部屋" in equip:
+    # 建物マスタへも構造・階数を反映する（従来は properties にしか
+    # 書いておらず、buildings.structure が常時 NULL だった）
+    if d.get("structure") or d.get("floors"):
+        bid = con.execute("SELECT building_id FROM units WHERE id=?",
+                          (uid,)).fetchone()
+        if bid:
+            con.execute("UPDATE buildings SET"
+                        " structure=COALESCE(?,structure),"
+                        " floors=COALESCE(?,floors) WHERE id=?",
+                        (d.get("structure"),
+                         str(d["floors"]) if d.get("floors") else None,
+                         bid[0]))
+    # SUUMO の実文言は「角住戸」が主流（「角部屋」だけ見ていたため
+    # 該当735件のうち1件しか立っていなかった）
+    if "角部屋" in equip or "角住戸" in equip:
         con.execute("UPDATE units SET corner=1 WHERE id=?", (uid,))
     con.execute("DELETE FROM listing_snapshots WHERE listing_id=?"
                 " AND date(fetched_at)=date('now')", (lid,))
@@ -169,9 +190,11 @@ def apply_detail(con, lid, uid, url, d):
                 (uid, status, (kw + " | " + d["equipment"][:400]), url,
                  "detail_parse", conf))
     # 設備テキストを amenities へ分解（従来は未投入で常に0件だった）
+    # 設備でない長文（PR文・物件概要の塊が混入したケースがある）は
+    # アメニティ名として登録しない。
     for name in (d.get("equipment") or "").replace(" ", "").split("、"):
         name = name.strip()
-        if name:
+        if name and len(name) <= 20 and "。" not in name:
             con.execute("INSERT OR IGNORE INTO amenities(unit_id,name)"
                         " VALUES(?,?)", (uid, name))
     con.execute(

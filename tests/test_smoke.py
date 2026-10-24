@@ -58,6 +58,72 @@ class TestParseDetail(unittest.TestCase):
         d = parse_detail(BeautifulSoup(html, "lxml"))
         self.assertIsNone(d["admin_yen"])
 
+    def _with_other(self, other, price_lines="7.05万円\n管理費: 11000円\n"):
+        return ("<html><body><div class='property_view_note-info'>\n"
+                + price_lines + "</div>"
+                "<table class='table_gaiyou'><tr><th>ほか初期費用</th>"
+                f"<td>{other}</td></tr></table></body></html>")
+
+    def test_agency_not_from_other_total(self):
+        # 「合計X万円（内訳：…）」の合計額を仲介手数料と誤認しない
+        html = self._with_other(
+            "合計14.3万円（内訳：鍵交換代3.3万円 クリーニング費5.5万円）")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["agency_yen"])
+        self.assertEqual(d["key_exchange_yen"], 33000)
+        self.assertEqual(d["cleaning_yen"], 55000)
+
+    def test_agency_labeled(self):
+        html = self._with_other("仲介手数料：5.94万円",
+                                "5.4万円\n管理費: 5000円\n")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertEqual(d["agency_yen"], 59400)
+
+    def test_agency_over_cap(self):
+        # 仲介手数料は賃料の1.1ヶ月分が上限。超過は誤読として捨てる
+        html = ("<html><body><div class='property_view_note-info'>\n"
+                "7万円\n管理費: 5000円\n仲介手数料: 20万円\n"
+                "</div></body></html>")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["agency_yen"])
+
+    def test_deposit_absurd_guard(self):
+        # 円額を万円欄に入力した誤記（敷金: 435600万円）を通さない
+        html = ("<html><body><div class='property_view_note-info'>\n"
+                "6.6万円\n管理費: 7000円\n敷金: 435600万円\n"
+                "</div></body></html>")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["deposit_yen"])
+
+    def test_support_glued_number_guard(self):
+        # 商品名末尾の数字と金額の連結誤読（241.65万円）は合計超過で捨てる
+        html = self._with_other(
+            "合計5.5万円（内訳：アクト安心ライフ241.65万円"
+            " あっとくらぶ1.1万円 鍵交換代2.75万円）",
+            "6.2万円\n管理費: 8000円\n")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["support_yen"])
+        self.assertEqual(d["key_exchange_yen"], 27500)
+
+    def _with_contract(self, contract, rent_line="7万円\n管理費: 5000円\n"):
+        return ("<html><body><div class='property_view_note-info'>\n"
+                + rent_line + "</div>"
+                "<table class='table_gaiyou'><tr><th>契約期間</th>"
+                f"<td>{contract}</td></tr></table></body></html>")
+
+    def test_contract_not_calendar_year(self):
+        # 定期借家の期限（西暦）を契約期間と誤認しない
+        d = parse_detail(BeautifulSoup(
+            self._with_contract("2028年3月末まで"), "lxml"))
+        self.assertIsNone(d["contract_months"])
+
+    def test_renewal_ratio_and_months(self):
+        # 比率表記の更新料（新賃料の1ヶ月分）を家賃から換算する
+        d = parse_detail(BeautifulSoup(
+            self._with_contract("2年 更新料: 新賃料の1ヶ月分"), "lxml"))
+        self.assertEqual(d["contract_months"], 24)
+        self.assertEqual(d["renewal_fee_yen"], 70000)
+
 
 class TestScore(unittest.TestCase):
     def test_score_uses_config(self):
@@ -132,6 +198,28 @@ class TestSavePreservesDetail(unittest.TestCase):
         self.assertIsNotNone(hb)
         # 詳細側の徒歩（4分）が properties にも反映される
         self.assertEqual(walk, 4)
+
+    def test_shikikin_none_is_null(self):
+        # 敷金・礼金が未取得のとき、文字列 'None' でなく NULL が入る
+        import db as db_mod
+        import scraper
+        row = {"name": "テスト2", "address": "大阪市西区立売堀3",
+               "age_years": 10, "floors": 5, "structure": "鉄筋系",
+               "area_m2": 25.0, "layout": "1K", "floor": 3,
+               "direction": None, "rent_yen": 80000, "admin_yen": 5000,
+               "shikikin_yen": None, "reikin_yen": None,
+               "url": "https://suumo.jp/chintai/jnc_000999999998/",
+               "stations": [{"line": "地下鉄中央線", "name": "阿波座",
+                             "walk": 5}],
+               "nearest": {"line": "地下鉄中央線", "name": "阿波座",
+                           "walk": 5}}
+        scraper.save([row])
+        con = db_mod.connect_db()
+        shiki, rei = con.execute(
+            "SELECT shikikin, reikin FROM listings").fetchone()
+        con.close()
+        self.assertIsNone(shiki)
+        self.assertIsNone(rei)
 
 
 class TestTimestampsUtc(unittest.TestCase):

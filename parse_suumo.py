@@ -210,6 +210,21 @@ def _find_yen(text, label_re, window=25):
     return None
 
 
+def _labeled_yen(text, label_re, rent, window=40):
+    """ラベル近傍の金額を返す。絶対額に加え「賃料の1ヶ月分」「55%」
+    のような比率表記も rent から換算する (_yen_or_ratio を使用)。
+
+    更新料などは比率表記が主流で、絶対額だけ探す _find_yen では
+    ほぼ全件取りこぼしていた（新DBで更新料 0/2,248件）。
+    """
+    t = nfkc(text or "")
+    for m in re.finditer(label_re, t):
+        v = _yen_or_ratio(t[m.end(): m.end() + window], rent)
+        if v is not None:
+            return v
+    return None
+
+
 def _guarantee_rate(text):
     t = nfkc(text or "")
     for pat in (r"初回[^0-9]{0,10}(\d{1,3})\s*[%％]",
@@ -249,17 +264,29 @@ def _yen_or_ratio(text, rent):
 
 
 def _agency_yen(g, other, full, price_raw, rent):
-    """仲介手数料。概要表の独立セル / 価格欄の行 / ほか初期費用 /
-    全文のラベル近傍、の順に探す。従来は未取得で costs.agency_yen が
-    常に NULL になり、実質総額が過小評価されていた。"""
-    for src in (price_raw, g.get("仲介手数料"), other):
+    """仲介手数料。ラベル付きの値だけを採用する。
+
+    従来は「ほか初期費用」全文の先頭金額へフォールバックしており、
+    注記が「合計14.3万円（内訳：…）」形式だと合計額そのものを
+    仲介手数料と誤認した（新DBで約999件、2年総額の二重計上の原因）。
+    ラベル近傍に無い金額は採用しない。あわせて、仲介手数料は
+    法律上 賃料の1.1ヶ月分が上限なので、超過分は誤読として捨てる。
+    """
+    v = None
+    for src in (price_raw, g.get("仲介手数料")):
         v = _yen_or_ratio(src, rent)
         if v is not None:
-            return v
-    idx = (full or "").find("仲介手数料")
-    if idx >= 0:
-        return _yen_or_ratio(full[idx: idx + 40], rent)
-    return None
+            break
+    if v is None and other and "仲介手数料" in other:
+        idx = other.find("仲介手数料")
+        v = _yen_or_ratio(other[idx: idx + 40], rent)
+    if v is None:
+        idx = (full or "").find("仲介手数料")
+        if idx >= 0:
+            v = _yen_or_ratio(full[idx: idx + 40], rent)
+    if v is not None and rent and v > rent * 1.1 + 1000:
+        return None
+    return v
 
 
 AMENITY_HINT = (
@@ -291,7 +318,14 @@ def _equipment_text(soup):
     for h in soup.find_all(["h2", "h3"]):
         t = h.get_text(strip=True)
         if "部屋の特徴" in t or "設備" in t:
-            return nfkc(h.parent.get_text(" ", strip=True)).split(t, 1)[-1].strip()
+            txt = nfkc(h.parent.get_text(" ", strip=True)) \
+                .split(t, 1)[-1].strip()
+            # 親要素の全文が返るページ型があり、PR文や物件概要の塊
+            # （数百字）が設備として混入した。設備らしい語を複数
+            # 含む場合だけ、長さに上限を付けて採用する。
+            if sum(1 for k in AMENITY_HINT if k in txt) >= 2:
+                return txt[:500]
+            return ""
     return ""
 
 
@@ -338,16 +372,64 @@ def parse_detail(soup):
     guarantee_rate = _guarantee_rate(g.get("保証会社"))
     rent = price["rent"]
     contract = g.get("契約期間") or ""
-    cm = re.search(r"(\d+)年", contract)
-    months = int(cm.group(1)) * 12 if cm else None
+    # 契約期間のパース: 「2028年3月末まで」のような定期借家の期限
+    # （西暦）を期間と誤認しないよう、大きな年数は除外する
+    # （誤認すると contract_months が 24336 のような値になった）。
+    months = None
+    for m in re.finditer(r"(\d+)\s*年", contract):
+        yrs = int(m.group(1))
+        if yrs <= 30:
+            months = yrs * 12
+            # 「2年6ヶ月」形式のときだけ月を足す（直後のみを見る。
+            # セル内の更新料「1ヶ月分」等を拾わないため）
+            mm = re.match(r"\s*(\d+)\s*(?:ヶ月|か月|カ月)",
+                          contract[m.end():])
+            if mm:
+                months += int(mm.group(1))
+            break
     # 保証会社の更新料と契約の更新料は別物。従来は両列に同じ値を
-    # 入れていたため実質月額で二重計上されていた。
-    guarantee_renew_yen = _find_yen(g.get("保証会社") or "", r"更新料")
-    renewal_fee_yen = _find_yen(contract, r"更新料") \
-        or _find_yen(other, r"更新手数料")
+    # 入れていたため実質月額で二重計上されていた。どちらも
+    # 「賃料の1ヶ月分」等の比率表記が多いため _labeled_yen で拾う。
+    guarantee_renew_yen = _labeled_yen(g.get("保証会社") or "",
+                                       r"更新料", rent)
+    renewal_fee_yen = _labeled_yen(contract, r"更新料", rent) \
+        or _labeled_yen(other, r"更新手数料", rent)
     admin = price["admin"]
     if rent and admin and admin > rent:
         admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
+    # 敷金・礼金等の異常値ガード: 仲介側が円額を万円欄に入力した
+    # ケース（実例「敷金: 435600万円」=43.5億円、家賃6.6万円）を通さない。
+    # 住宅の敷金・礼金・保証金は通常0〜数ヶ月分で、12ヶ月分超は誤記。
+    if rent:
+        for key in ("deposit", "key_money", "hoshoukin", "shoukyaku"):
+            if price[key] is not None and price[key] > rent * 12:
+                price[key] = None
+
+    key_exchange_yen = _find_yen(other, r"鍵交換")
+    cleaning_yen = _find_yen(other,
+                              r"(ハウスクリーニング|室内清掃|清掃|クリーニング)")
+    support_yen = _find_yen(other, r"(サポート|CLUB|プレサポ|除菌消臭|安心)")
+    # 「合計X万円（内訳：…）」形式では各項目は合計以下のはず。
+    # 商品名末尾の数字と金額が連結した誤読（実例「アクト安心ライフ24
+    # 1.65万円」が分離されず 241.65万円 になる）では項目が合計を
+    # 超えるため、合計を超えた項目は捨てる。サポート費は合計が
+    # 取れない場合でも10万円超を実勢外として捨てる。
+    total_m = re.match(r"合計\s*([\d,]+(?:\.\d+)?\s*万円|[\d,]+\s*円)",
+                       nfkc(other or ""))
+    other_total = to_yen(total_m.group(1)) if total_m else None
+
+    def _cap_fee(v, cap=None):
+        if v is None:
+            return None
+        if other_total is not None and v > other_total:
+            return None
+        if cap is not None and v > cap:
+            return None
+        return v
+
+    key_exchange_yen = _cap_fee(key_exchange_yen)
+    cleaning_yen = _cap_fee(cleaning_yen)
+    support_yen = _cap_fee(support_yen, cap=100000)
 
     return {
         "rent_yen": rent,
@@ -357,9 +439,9 @@ def parse_detail(soup):
         "hoshoukin_yen": price["hoshoukin"],
         "shoukyaku_yen": price["shoukyaku"],
         "insurance_yen": to_yen(g.get("損保")),
-        "key_exchange_yen": _find_yen(other, r"鍵交換"),
-        "cleaning_yen": _find_yen(other, r"(ハウスクリーニング|室内清掃|清掃|クリーニング)"),
-        "support_yen": _find_yen(other, r"(サポート|CLUB|プレサポ|除菌消臭|安心)"),
+        "key_exchange_yen": key_exchange_yen,
+        "cleaning_yen": cleaning_yen,
+        "support_yen": support_yen,
         "guarantee_first_yen": (int(rent * guarantee_rate / 100)
                                 if rent and guarantee_rate else None),
         "guarantee_renew_yen": guarantee_renew_yen,

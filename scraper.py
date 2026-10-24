@@ -114,6 +114,15 @@ def _save_stations(con, uid, stations, nearest):
                     (uid, nearest["name"], nearest.get("line"), nearest["walk"]))
 
 
+def _txt(v):
+    """TEXT列用: None は文字列 'None' でなく NULL として保存する。
+
+    従来は str(None) がそのまま入り、listings.shikikin/reikin の
+    大半が 'None' という文字列になっていた（新DBで8,116件）。
+    """
+    return None if v is None else str(v)
+
+
 def save(rows):
     """一覧取得行を properties と正規化テーブルへ upsert。"""
     con = connect_db()
@@ -133,15 +142,15 @@ def save(rows):
             con.execute("UPDATE listings SET unit_id=?,rent_yen=?,admin_yen=?,"
                         "shikikin=?,reikin=?,last_seen=datetime('now'),"
                         "active=1 WHERE id=?",
-                        (uid, rent, admin, str(r["shikikin_yen"]),
-                         str(r["reikin_yen"]), lid))
+                        (uid, rent, admin, _txt(r["shikikin_yen"]),
+                         _txt(r["reikin_yen"]), lid))
         else:
             con.execute(
                 "INSERT INTO listings(unit_id,site,url,rent_yen,admin_yen,"
                 "shikikin,reikin,last_seen,active) VALUES(?,?,?,?,?,?,?,"
                 "datetime('now'),1)",
                 (uid, "suumo", r["url"], rent, admin,
-                 str(r["shikikin_yen"]), str(r["reikin_yen"])))
+                 _txt(r["shikikin_yen"]), _txt(r["reikin_yen"])))
             lid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
         con.execute("INSERT OR IGNORE INTO costs(listing_id,key_money_yen,"
                     "deposit_yen,fetched) VALUES(?,?,?,0)",
