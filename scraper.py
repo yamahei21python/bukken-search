@@ -1,1 +1,248 @@
-IiIi6LOD6LK444K544Kv44Os44Kk44OR44O8OiBTVVVNT+S4gOimpyAtPiDmraPopo/ljJZEQiArIHByb3BlcnRpZXMg44G45Y+W44KK6L6844KA44CCCgrml6fniYjjgYvjgonjga7kv67mraPngrk6CiAgLSDkuIDopqcgdGQg44KS5Zu65a6a5L2N572u44Gn6Kqt44KAKOepuuOCu+ODq+mZpOWOu+OBq+OCiOOCi+ahgeOCuuODrOOCkuaOkumZpCkgLT4gcGFyc2Vfc3V1bW8KICAtIOmnheOBr+OCq+OCu+ODg+ODiOWGheOBruWFqOOAjOi3r+e3mi/pp4Ug5q2pTuWIhuOAjeOCkuWPluW+l+OBl+acgOWvhOOCiuOCkuaOoeeUqOOAguaknOe0oumnheOBruWbuuWumuS7o+WFpeOCkuW7g+atogogIC0gVVJMIOOBryA/YmM9IOOCkumZpOWOu+OBl+OBpuato+imj+WMluOAgmpuYyDnlarlj7fjgafph43opIfmjpLpmaQo5penOiBVTklRVUXjgYzlirnjgYvjgZrph43opIfmt7flhaUpCiAgLSBwcm9wZXJ0aWVzIOOBqyBzaGlraWtpbi9yZWlraW4vZGlyZWN0aW9uL3N0cnVjdHVyZS9mbG9vcnMg562J44KS5pyA5Yid44GL44KJ5L2c5oiQCiAgLSDmraPopo/ljJbjg4bjg7zjg5bjg6soYnVpbGRpbmdzL3VuaXRzL3N0YXRpb25zL2xpc3RpbmdzL2Nvc3RzKeOCkuebtOaOpeabtOaWsAoK5L2/44GE5pa5OgogIHB5dGhvbjMgc2NyYXBlci5weSAtLXJlYnVpbGQgLS1tYXgtcGFnZXMgMyAgICAgICAgICAgIyBEQuWGjeS9nOaIkOOBl+OBpuWPluW+lwogIHB5dGhvbjMgc2NyYXBlci5weSAtLXN0YXRpb25zIOmYv+azouW6pyDmnKznlLogLS1tYXgtcGFnZXMgMgogIHB5dGhvbjMgc2NyYXBlci5weSAtLWxpc3QtaHRtbCBwYXRoL3RvL2xpc3QuaHRtbCAgICAgIyDkv53lrZjmuIjjgb9IVE1M44KS6Kej5p6QKOOCquODleODqeOCpOODsykKIiIiCmltcG9ydCBhcmdwYXJzZQppbXBvcnQgdGltZQpmcm9tIHBhdGhsaWIgaW1wb3J0IFBhdGgKCmltcG9ydCB5YW1sCmZyb20gYnM0IGltcG9ydCBCZWF1dGlmdWxTb3VwCgpmcm9tIGRiIGltcG9ydCBEQiwgY29ubmVjdF9kYiwgaW5pdGlhbGl6ZV9kYgpmcm9tIHBhcnNlX3N1dW1vIGltcG9ydCBub3JtYWxpemVfYWRkcmVzcywgbm9ybWFsaXplX2J1aWxkaW5nX25hbWUsIHBhcnNlX2xpc3QKZnJvbSBzY3JhcGVfY29tbW9uIGltcG9ydCBmZXRjaF9zb3VwLCBzbGVlcF93aXRoX2ppdHRlcgoKQkFTRSA9ICJodHRwczovL3N1dW1vLmpwIgpDRkcgPSB5YW1sLnNhZmVfbG9hZChvcGVuKFBhdGgoX19maWxlX18pLnBhcmVudCAvICJjb25maWcueWFtbCIpKQpFS19DT0RFUyA9IENGR1siZWtfY29kZXMiXQoKZGVmIGluaXRfZGIocmVidWlsZD1GYWxzZSk6CiAgICAiIiLkupLmj5vntq3mjIHnlKjjg6njg4Pjg5Hjg7zjgILlrp/kvZPjga9kYi5pbml0aWFsaXplX2Ri44CCIiIiCiAgICBpbml0aWFsaXplX2RiKHJlYnVpbGQ9cmVidWlsZCkKCgpkZWYgb3Zlcl9jYXAocmVudF95ZW4sIGNoaW5yeW9fbWF4KToKICAgICIiIuWutuizg+OBjOS4iumZkO+8iOS4h+WGhuaMh+Wumu+8ieOCkui2heOBiOOCi+OBi+OAggoKICAgIFNVVU1PIOOBriBmcl9jaGlucnlvbWF4IOODkeODqeODoeODvOOCv+OBr+mnheODmuODvOOCuOOBp+OBr+eEoeWKue+8iOS7mOOBkeOBpuOCggogICAg57WQ5p6c44GM5aSJ44KP44KJ44Gq44GE44GT44Go44KS5a6f5Zyw56K66KqN5riI44G/77yJ44Gq44Gu44Gn44CB5Y+W5b6X5YG044Gn5by+44GP44CCCiAgICAiIiIKICAgIHJldHVybiBib29sKGNoaW5yeW9fbWF4IGFuZCByZW50X3llbgogICAgICAgICAgICAgICAgYW5kIHJlbnRfeWVuID4gY2hpbnJ5b19tYXggKiAxMDAwMCkKCgpkZWYgbGlzdF91cmwocGFnZSwgZWssIGNoaW5yeW9fbWF4KToKICAgIHUgPSBmIntCQVNFfS9jaGludGFpL29zYWthL3tla30vP2ZyX2NoaW5yeW9tYXg9e2NoaW5yeW9fbWF4fSIKICAgIGlmIHBhZ2UgPiAxOgogICAgICAgIHUgKz0gZiImcGFnZT17cGFnZX0iCiAgICByZXR1cm4gdQoKCmRlZiBmZXRjaCh1cmw6IHN0ciwgcmV0cnk6IGludCA9IDMpIC0+IEJlYXV0aWZ1bFNvdXA6CiAgICAiIiLkuIDopqdVUkzlj5blvpfjgII0MjkvNXh444KS5YaN6Kmm6KGM44CCIiIiCiAgICByZXR1cm4gZmV0Y2hfc291cCh1cmwsIHJldHJ5PXJldHJ5LCByZXRyeV9kZWxheT01KQoKCmRlZiBfZ2V0X29yX2NyZWF0ZV9idWlsZGluZyhjb24sIHIpOgogICAgbmEgPSBub3JtYWxpemVfYWRkcmVzcyhyWyJhZGRyZXNzIl0pCiAgICBubiA9IG5vcm1hbGl6ZV9idWlsZGluZ19uYW1lKHJbIm5hbWUiXSkgb3IgclsibmFtZSJdCiAgICByb3cgPSBjb24uZXhlY3V0ZSgiU0VMRUNUIGlkLGFnZV95ZWFycyxzdHJ1Y3R1cmUsZmxvb3JzIEZST00gYnVpbGRpbmdzIgogICAgICAgICAgICAgICAgICAgICAgIiBXSEVSRSBub3JtX2FkZHJlc3M9PyBBTkQgbm9ybV9uYW1lPT8iLCAobmEsIG5uKSkuZmV0Y2hvbmUoKQogICAgaWYgcm93OgogICAgICAgIGNvbi5leGVjdXRlKCJVUERBVEUgYnVpbGRpbmdzIFNFVCBhZ2VfeWVhcnM9Q09BTEVTQ0UoPyxhZ2VfeWVhcnMpLCIKICAgICAgICAgICAgICAgICAgICAiIHN0cnVjdHVyZT1DT0FMRVNDRSg/LHN0cnVjdHVyZSksIGZsb29ycz1DT0FMRVNDRSg/LGZsb29ycykiCiAgICAgICAgICAgICAgICAgICAgIiBXSEVSRSBpZD0/IiwgKHJbImFnZV95ZWFycyJdLCByLmdldCgic3RydWN0dXJlIiksCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHJbImZsb29ycyJdLCByb3dbMF0pKQogICAgICAgIHJldHVybiByb3dbMF0KICAgIGNvbi5leGVjdXRlKCJJTlNFUlQgSU5UTyBidWlsZGluZ3Mobm9ybV9hZGRyZXNzLG5hbWUsbm9ybV9uYW1lLGFnZV95ZWFycywiCiAgICAgICAgICAgICAgICAic3RydWN0dXJlLGZsb29ycykgVkFMVUVTKD8sPyw/LD8sPyw/KSIsCiAgICAgICAgICAgICAgICAobmEsIHJbIm5hbWUiXSwgbm4sIHJbImFnZV95ZWFycyJdLCByLmdldCgic3RydWN0dXJlIiksCiAgICAgICAgICAgICAgICAgclsiZmxvb3JzIl0pKQogICAgcmV0dXJuIGNvbi5leGVjdXRlKCJTRUxFQ1QgbGFzdF9pbnNlcnRfcm93aWQoKSIpLmZldGNob25lKClbMF0KCgpkZWYgX2dldF9vcl9jcmVhdGVfdW5pdChjb24sIGJpZCwgcik6CiAgICBpZiBub3QgclsiYXJlYV9tMiJdOgogICAgICAgIHJldHVybiBOb25lCiAgICByb3cgPSBjb24uZXhlY3V0ZSgKICAgICAgICAiU0VMRUNUIGlkIEZST00gdW5pdHMgV0hFUkUgYnVpbGRpbmdfaWQ9PyBBTkQgbGF5b3V0PT8gIgogICAgICAgICJBTkQgYWJzKGFyZWFfbTItPyk8PTAuMyBBTkQgKGZsb29yIElTID8gT1IgZmxvb3I9PykiLAogICAgICAgIChiaWQsIHJbImxheW91dCJdLCByWyJhcmVhX20yIl0sIHJbImZsb29yIl0sIHJbImZsb29yIl0pKS5mZXRjaG9uZSgpCiAgICBpZiByb3c6CiAgICAgICAgcmV0dXJuIHJvd1swXQogICAgY29uLmV4ZWN1dGUoIklOU0VSVCBJTlRPIHVuaXRzKGJ1aWxkaW5nX2lkLGZsb29yLGFyZWFfbTIsbGF5b3V0LGRpcmVjdGlvbikiCiAgICAgICAgICAgICAgICAiIFZBTFVFUyg/LD8sPyw/LD8pIiwKICAgICAgICAgICAgICAgIChiaWQsIHJbImZsb29yIl0sIHJbImFyZWFfbTIiXSwgclsibGF5b3V0Il0sIHIuZ2V0KCJkaXJlY3Rpb24iKSkpCiAgICByZXR1cm4gY29uLmV4ZWN1dGUoIlNFTEVDVCBsYXN0X2luc2VydF9yb3dpZCgpIikuZmV0Y2hvbmUoKVswXQoKCmRlZiBfc2F2ZV9zdGF0aW9ucyhjb24sIHVpZCwgc3RhdGlvbnMsIG5lYXJlc3QpOgogICAgaWYgbm90IHVpZDoKICAgICAgICByZXR1cm4KICAgIHNlZW4gPSBzZXQoKQogICAgZm9yIHMgaW4gc3RhdGlvbnMgb3IgW106CiAgICAgICAgc2Vlbi5hZGQoKHNbIm5hbWUiXSwgc1sibGluZSJdKSkKICAgICAgICBjb24uZXhlY3V0ZSgiSU5TRVJUIE9SIElHTk9SRSBJTlRPIHN0YXRpb25zKHVuaXRfaWQsbmFtZSxsaW5lLHdhbGtfbWluKSIKICAgICAgICAgICAgICAgICAgICAiIFZBTFVFUyg/LD8sPyw/KSIsICh1aWQsIHNbIm5hbWUiXSwgc1sibGluZSJdLCBzWyJ3YWxrIl0pKQogICAgaWYgbm90IHN0YXRpb25zIGFuZCBuZWFyZXN0LmdldCgibmFtZSIpOgogICAgICAgIGNvbi5leGVjdXRlKCJJTlNFUlQgT1IgSUdOT1JFIElOVE8gc3RhdGlvbnModW5pdF9pZCxuYW1lLGxpbmUsd2Fsa19taW4pIgogICAgICAgICAgICAgICAgICAgICIgVkFMVUVTKD8sPyw/LD8pIiwKICAgICAgICAgICAgICAgICAgICAodWlkLCBuZWFyZXN0WyJuYW1lIl0sIG5lYXJlc3QuZ2V0KCJsaW5lIiksIG5lYXJlc3RbIndhbGsiXSkpCgoKZGVmIHNhdmUocm93cyk6CiAgICAiIiLkuIDopqflj5blvpfooYzjgpIgcHJvcGVydGllcyDjgajmraPopo/ljJbjg4bjg7zjg5bjg6vjgbggdXBzZXJ044CCIiIiCiAgICBjb24gPSBjb25uZWN0X2RiKCkKICAgIG4gPSAwCiAgICBmb3IgciBpbiByb3dzOgogICAgICAgIGlmIG5vdCByWyJ1cmwiXToKICAgICAgICAgICAgY29udGludWUKICAgICAgICBiaWQgPSBfZ2V0X29yX2NyZWF0ZV9idWlsZGluZyhjb24sIHIpCiAgICAgICAgdWlkID0gX2dldF9vcl9jcmVhdGVfdW5pdChjb24sIGJpZCwgcikKICAgICAgICBfc2F2ZV9zdGF0aW9ucyhjb24sIHVpZCwgclsic3RhdGlvbnMiXSwgclsibmVhcmVzdCJdKQogICAgICAgIHJlbnQsIGFkbWluID0gclsicmVudF95ZW4iXSwgclsiYWRtaW5feWVuIl0KICAgICAgICB0b3RhbCA9IChyZW50IG9yIDApICsgKGFkbWluIG9yIDApCiAgICAgICAgcm93ID0gY29uLmV4ZWN1dGUoIlNFTEVDVCBpZCBGUk9NIGxpc3RpbmdzIFdIRVJFIHVybD0/IiwKICAgICAgICAgICAgICAgICAgICAgICAgICAoclsidXJsIl0sKSkuZmV0Y2hvbmUoKQogICAgICAgIGlmIHJvdzoKICAgICAgICAgICAgbGlkID0gcm93WzBdCiAgICAgICAgICAgIGNvbi5leGVjdXRlKCJVUERBVEUgbGlzdGluZ3MgU0VUIHVuaXRfaWQ9PyxyZW50X3llbj0/LGFkbWluX3llbj0/LCIKICAgICAgICAgICAgICAgICAgICAgICAgInNoaWtpa2luPT8scmVpa2luPT8sbGFzdF9zZWVuPWRhdGV0aW1lKCdub3cnLCIKICAgICAgICAgICAgICAgICAgICAgICAgIidsb2NhbHRpbWUnKSxhY3RpdmU9MSBXSEVSRSBpZD0/IiwKICAgICAgICAgICAgICAgICAgICAgICAgKHVpZCwgcmVudCwgYWRtaW4sIHN0cihyWyJzaGlraWtpbl95ZW4iXSksCiAgICAgICAgICAgICAgICAgICAgICAgICBzdHIoclsicmVpa2luX3llbiJdKSwgbGlkKSkKICAgICAgICBlbHNlOgogICAgICAgICAgICBjb24uZXhlY3V0ZSgKICAgICAgICAgICAgICAgICJJTlNFUlQgSU5UTyBsaXN0aW5ncyh1bml0X2lkLHNpdGUsdXJsLHJlbnRfeWVuLGFkbWluX3llbiwiCiAgICAgICAgICAgICAgICAic2hpa2lraW4scmVpa2luLGxhc3Rfc2VlbixhY3RpdmUpIFZBTFVFUyg/LD8sPyw/LD8sPyw/LCIKICAgICAgICAgICAgICAgICJkYXRldGltZSgnbm93JywnbG9jYWx0aW1lJyksMSkiLAogICAgICAgICAgICAgICAgKHVpZCwgInN1dW1vIiwgclsidXJsIl0sIHJlbnQsIGFkbWluLAogICAgICAgICAgICAgICAgIHN0cihyWyJzaGlraWtpbl95ZW4iXSksIHN0cihyWyJyZWlraW5feWVuIl0pKSkKICAgICAgICAgICAgbGlkID0gY29uLmV4ZWN1dGUoIlNFTEVDVCBsYXN0X2luc2VydF9yb3dpZCgpIikuZmV0Y2hvbmUoKVswXQogICAgICAgIGNvbi5leGVjdXRlKCJJTlNFUlQgT1IgSUdOT1JFIElOVE8gY29zdHMobGlzdGluZ19pZCxrZXlfbW9uZXlfeWVuLCIKICAgICAgICAgICAgICAgICAgICAiZGVwb3NpdF95ZW4sZmV0Y2hlZCkgVkFMVUVTKD8sPyw/LDApIiwKICAgICAgICAgICAgICAgICAgICAobGlkLCByWyJyZWlraW5feWVuIl0sIHJbInNoaWtpa2luX3llbiJdKSkKICAgICAgICAjIE9OIENPTkZMSUNUIOOBp+abtOaWsOOBmeOCi+OAgklOU0VSVCBPUiBSRVBMQUNFIOOBoOOBqOihjOOBjOS9nOOCiuebtOOBleOCjOOAgQogICAgICAgICMg6Kmz57Sw5Y+W5b6X44Gn5YWl44KM44GfIGVxdWlwbWVudCAvIGhhc19iYXRodHViIOOBjOS4gOimp+OBruWGjeWPluW+l+OBruOBn+OBs+OBqwogICAgICAgICMg5raI44GI44Gm44GX44G+44GG44Gf44KB44CB5LiA6Kan55Sx5p2l44Gu5YiX44Gg44GR44KS5pu05paw44GZ44KL44CCCiAgICAgICAgY29uLmV4ZWN1dGUoCiAgICAgICAgICAgICJJTlNFUlQgSU5UTyBwcm9wZXJ0aWVzKG5hbWUsYWRkcmVzcyxzdGF0aW9uLHdhbGtfbWluLCIKICAgICAgICAgICAgImFnZV95ZWFycyxyb29tX2Zsb29yLHJlbnRfeWVuLGFkbWluX3llbix0b3RhbF95ZW4sc2hpa2lraW5feWVuLCIKICAgICAgICAgICAgInJlaWtpbl95ZW4sbGF5b3V0LGFyZWFfbTIsZGlyZWN0aW9uLHN0cnVjdHVyZSxmbG9vcnMsZGV0YWlsX3VybCwiCiAgICAgICAgICAgICJzY3JhcGVkX2F0KSBWQUxVRVMoPyw/LD8sPyw/LD8sPyw/LD8sPyw/LD8sPyw/LD8sPyw/LCIKICAgICAgICAgICAgImRhdGV0aW1lKCdub3cnLCdsb2NhbHRpbWUnKSkiCiAgICAgICAgICAgICIgT04gQ09ORkxJQ1QoZGV0YWlsX3VybCkgRE8gVVBEQVRFIFNFVCIKICAgICAgICAgICAgIiBuYW1lPWV4Y2x1ZGVkLm5hbWUsYWRkcmVzcz1leGNsdWRlZC5hZGRyZXNzLCIKICAgICAgICAgICAgIiBzdGF0aW9uPWV4Y2x1ZGVkLnN0YXRpb24sd2Fsa19taW49ZXhjbHVkZWQud2Fsa19taW4sIgogICAgICAgICAgICAiIGFnZV95ZWFycz1leGNsdWRlZC5hZ2VfeWVhcnMscm9vbV9mbG9vcj1leGNsdWRlZC5yb29tX2Zsb29yLCIKICAgICAgICAgICAgIiByZW50X3llbj1leGNsdWRlZC5yZW50X3llbixhZG1pbl95ZW49ZXhjbHVkZWQuYWRtaW5feWVuLCIKICAgICAgICAgICAgIiB0b3RhbF95ZW49ZXhjbHVkZWQudG90YWxfeWVuLCIKICAgICAgICAgICAgIiBzaGlraWtpbl95ZW49ZXhjbHVkZWQuc2hpa2lraW5feWVuLCIKICAgICAgICAgICAgIiByZWlraW5feWVuPWV4Y2x1ZGVkLnJlaWtpbl95ZW4sbGF5b3V0PWV4Y2x1ZGVkLmxheW91dCwiCiAgICAgICAgICAgICIgYXJlYV9tMj1leGNsdWRlZC5hcmVhX20yLGRpcmVjdGlvbj1leGNsdWRlZC5kaXJlY3Rpb24sIgogICAgICAgICAgICAiIHN0cnVjdHVyZT1leGNsdWRlZC5zdHJ1Y3R1cmUsZmxvb3JzPWV4Y2x1ZGVkLmZsb29ycywiCiAgICAgICAgICAgICIgc2NyYXBlZF9hdD1leGNsdWRlZC5zY3JhcGVkX2F0IiwKICAgICAgICAgICAgKHJbIm5hbWUiXSwgclsiYWRkcmVzcyJdLCByWyJuZWFyZXN0Il1bIm5hbWUiXSwKICAgICAgICAgICAgIHJbIm5lYXJlc3QiXVsid2FsayJdLCByWyJhZ2VfeWVhcnMiXSwgclsiZmxvb3IiXSwgcmVudCwgYWRtaW4sCiAgICAgICAgICAgICB0b3RhbCwgclsic2hpa2lraW5feWVuIl0sIHJbInJlaWtpbl95ZW4iXSwgclsibGF5b3V0Il0sCiAgICAgICAgICAgICByWyJhcmVhX20yIl0sIHIuZ2V0KCJkaXJlY3Rpb24iKSwgci5nZXQoInN0cnVjdHVyZSIpLAogICAgICAgICAgICAgclsiZmxvb3JzIl0sIHJbInVybCJdKSkKICAgICAgICBuICs9IDEKICAgIGNvbi5jb21taXQoKQogICAgY29uLmNsb3NlKCkKICAgIHJldHVybiBuCgoKZGVmIGRlYWN0aXZhdGVfc3RhbGUoZGF5cz03KToKICAgICIiIuS4gOWumuaXpeaVsOimi+OBpuOBhOOBquOBhCBsaXN0aW5ncyDjgpIgYWN0aXZlPTAg44Gr44GZ44KL44CCCgogICAg5b6T5p2l44GvIGFjdGl2ZT0wIOOBuOOBrumBt+enu+OBjOeEoeOBj+OAgeWLn+mbhue1guS6huOBl+OBn+eJqeS7tuOBjOavjembhuWbo+OBqwogICAg5q6L44KK57aa44GR44Gm5Ymy5a6J5Yik5a6a44KS5rGa44GX44Gm44GE44Gf44CC5YaN44Gz5LiA6Kan44Gr54++44KM44KM44GwIHNhdmUoKSDjgYwKICAgIGFjdGl2ZT0xIOOBq+aIu+OBmeOAguWFqOmnheOCkuWbnuOBmemAmuW4uOWun+ihjOOBruOBqOOBjeOBoOOBkeWRvOOBtuOBk+OBqAogICAg77yI5LiA6YOo6aeF44Gg44GR44Gu5a6f6KGM44Gn5LuW6aeF44Gu54mp5Lu244KS6JC944Go44GV44Gq44GE44Gf44KB77yJ44CCCiAgICAiIiIKICAgIGNvbiA9IGNvbm5lY3RfZGIoKQogICAgY3VyID0gY29uLmV4ZWN1dGUoCiAgICAgICAgIlVQREFURSBsaXN0aW5ncyBTRVQgYWN0aXZlPTAgV0hFUkUgYWN0aXZlPTEiCiAgICAgICAgIiBBTkQgbGFzdF9zZWVuIDwgZGF0ZXRpbWUoJ25vdycsJ2xvY2FsdGltZScsPykiLAogICAgICAgIChmIi17ZGF5c30gZGF5cyIsKSkKICAgIGNvbi5jb21taXQoKQogICAgbiA9IGN1ci5yb3djb3VudAogICAgY29uLmNsb3NlKCkKICAgIHJldHVybiBuCgoKZGVmIG1haW4oKToKICAgIGFwID0gYXJncGFyc2UuQXJndW1lbnRQYXJzZXIoKQogICAgYXAuYWRkX2FyZ3VtZW50KCItLW1heC1wYWdlcyIsIHR5cGU9aW50LCBkZWZhdWx0PTMpCiAgICBhcC5hZGRfYXJndW1lbnQoIi0tY2hpbnJ5by1tYXgiLCB0eXBlPWludCwgZGVmYXVsdD0xMikKICAgIGFwLmFkZF9hcmd1bWVudCgiLS1zdGF0aW9ucyIsIG5hcmdzPSIqIiwgZGVmYXVsdD1Ob25lLAogICAgICAgICAgICAgICAgICAgIGhlbHA9IuecgeeVpeaZguOBryBjb25maWcueWFtbCDjga7lhajpp4UiKQogICAgYXAuYWRkX2FyZ3VtZW50KCItLXJlYnVpbGQiLCBhY3Rpb249InN0b3JlX3RydWUiLCBoZWxwPSLlhajjg4bjg7zjg5bjg6vlho3kvZzmiJAiKQogICAgYXAuYWRkX2FyZ3VtZW50KCItLWxpc3QtaHRtbCIsIHR5cGU9UGF0aCwKICAgICAgICAgICAgICAgICAgICBoZWxwPSLkv53lrZjmuIjjgb/kuIDopqdIVE1M44KS6Kej5p6QKOODjeODg+ODiOODr+ODvOOCr+S4jeimgSkiKQogICAgYXAuYWRkX2FyZ3VtZW50KCItLWRyeS1ydW4iLCBhY3Rpb249InN0b3JlX3RydWUiKQogICAgYXAuYWRkX2FyZ3VtZW50KCItLXNsZWVwIiwgdHlwZT1mbG9hdCwgZGVmYXVsdD0zLjAsCiAgICAgICAgICAgICAgICAgICAgaGVscD0iMeODmuODvOOCuOavjuOBruW+heapn+enkijosqDojbfou73muJspIikKICAgIGFwLmFkZF9hcmd1bWVudCgiLS1qaXR0ZXIiLCB0eXBlPWZsb2F0LCBkZWZhdWx0PTEuNSwKICAgICAgICAgICAgICAgICAgICBoZWxwPSLlvoXmqZ/jgavliqDjgYjjgovjg6njg7Pjg4Djg6DluYUo56eSKSIpCiAgICBhcC5hZGRfYXJndW1lbnQoIi0tc3RhbGUtZGF5cyIsIHR5cGU9aW50LCBkZWZhdWx0PTcsCiAgICAgICAgICAgICAgICAgICAgaGVscD0i44GT44Gu5pel5pWw6KaL44Gm44GE44Gq44GEIGxpc3RpbmdzIOOCkiBhY3RpdmU9MCDjgavjgZnjgosiCiAgICAgICAgICAgICAgICAgICAgICAgICAi77yI5YWo6aeF5a6f6KGM5pmC44Gu44G/77yJIikKICAgIGEgPSBhcC5wYXJzZV9hcmdzKCkKCiAgICBpbml0X2RiKHJlYnVpbGQ9YS5yZWJ1aWxkKQoKICAgIGlmIGEubGlzdF9odG1sOgogICAgICAgIHJvd3MgPSBwYXJzZV9saXN0KEJlYXV0aWZ1bFNvdXAoYS5saXN0X2h0bWwucmVhZF90ZXh0KCksICJseG1sIikpCiAgICAgICAgcm93cyA9IFtyIGZvciByIGluIHJvd3MKICAgICAgICAgICAgICAgIGlmIG5vdCBvdmVyX2NhcChyWyJyZW50X3llbiJdLCBhLmNoaW5yeW9fbWF4KV0KICAgICAgICBwcmludChmInthLmxpc3RfaHRtbC5uYW1lfToge2xlbihyb3dzKX0gcm9vbXMiKQogICAgICAgIGlmIG5vdCBhLmRyeV9ydW46CiAgICAgICAgICAgIHByaW50KCJzYXZlZCIsIHNhdmUocm93cykpCiAgICAgICAgcmV0dXJuCgogICAgdGFyZ2V0cyA9IGEuc3RhdGlvbnMgb3IgbGlzdChFS19DT0RFUykKICAgIHRvdGFsID0gMAogICAgZm9yIHN0biBpbiB0YXJnZXRzOgogICAgICAgIGVrID0gRUtfQ09ERVMuZ2V0KHN0bikKICAgICAgICBpZiBub3QgZWs6CiAgICAgICAgICAgIHByaW50KGYiW3NraXBdIHVua25vd24gc3RhdGlvbjoge3N0bn0iKQogICAgICAgICAgICBjb250aW51ZQogICAgICAgIGZvciBwYWdlIGluIHJhbmdlKDEsIGEubWF4X3BhZ2VzICsgMSk6CiAgICAgICAgICAgIHVybCA9IGxpc3RfdXJsKHBhZ2UsIGVrLCBhLmNoaW5yeW9fbWF4KQogICAgICAgICAgICB0cnk6CiAgICAgICAgICAgICAgICBzb3VwID0gZmV0Y2godXJsKQogICAgICAgICAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgICAgICAgICBwcmludChmIltsaXN0IGVycm9yXSB7c3RufSBwe3BhZ2V9OiB7c3RyKGUpWzoxMDBdfSIpCiAgICAgICAgICAgICAgICBicmVhawogICAgICAgICAgICByYXcgPSBwYXJzZV9saXN0KHNvdXAsIGZvY3VzX3N0YXRpb249c3RuKQogICAgICAgICAgICBpZiBub3QgcmF3OgogICAgICAgICAgICAgICAgYnJlYWsKICAgICAgICAgICAgcm93cyA9IFtyIGZvciByIGluIHJhdwogICAgICAgICAgICAgICAgICAgIGlmIG5vdCBvdmVyX2NhcChyWyJyZW50X3llbiJdLCBhLmNoaW5yeW9fbWF4KV0KICAgICAgICAgICAgcHJpbnQoZiJbbGlzdF0ge3N0bn0gcHtwYWdlfToge2xlbihyb3dzKX0gcm9vbXMiCiAgICAgICAgICAgICAgICAgIGYiIChjYXAgZHJvcCB7bGVuKHJhdykgLSBsZW4ocm93cyl9KSIpCiAgICAgICAgICAgIGlmIG5vdCBhLmRyeV9ydW46CiAgICAgICAgICAgICAgICBzYXZlKHJvd3MpCiAgICAgICAgICAgIHRvdGFsICs9IGxlbihyb3dzKQogICAgICAgICAgICBzbGVlcF93aXRoX2ppdHRlcihhLnNsZWVwLCBhLmppdHRlcikKICAgIGlmIG5vdCBhLmRyeV9ydW4gYW5kIG5vdCBhLnN0YXRpb25zOgogICAgICAgIG4gPSBkZWFjdGl2YXRlX3N0YWxlKGEuc3RhbGVfZGF5cykKICAgICAgICBwcmludChmImRlYWN0aXZhdGVkIHN0YWxlIGxpc3RpbmdzOiB7bn0gKD57YS5zdGFsZV9kYXlzfSBkYXlzKSIpCiAgICBwcmludChmImRvbmU6IHt0b3RhbH0gcm9vbXMgLT4ge0RCfSIpCgoKaWYgX19uYW1lX18gPT0gIl9fbWFpbl9fIjoKICAgIG1haW4oKQo=
+"""賃貸スクレイパー: SUUMO一覧 -> 正規化DB + properties へ取り込む。
+
+旧版からの修正点:
+  - 一覧 td を固定位置で読む(空セル除去による桁ズレを排除) -> parse_suumo
+  - 駅はカセット内の全「路線/駅 歩N分」を取得し最寄りを採用。検索駅の固定代入を廃止
+  - URL は ?bc= を除去して正規化。jnc 番号で重複排除(旧: UNIQUEが効かず重複混入)
+  - properties に shikikin/reikin/direction/structure/floors 等を最初から作成
+  - 正規化テーブル(buildings/units/stations/listings/costs)を直接更新
+
+使い方:
+  python3 scraper.py --rebuild --max-pages 3           # DB再作成して取得
+  python3 scraper.py --stations 阿波座 本町 --max-pages 2
+  python3 scraper.py --list-html path/to/list.html     # 保存済みHTMLを解析(オフライン)
+"""
+import argparse
+import time
+from pathlib import Path
+
+import yaml
+from bs4 import BeautifulSoup
+
+from db import DB, connect_db, initialize_db
+from parse_suumo import normalize_address, normalize_building_name, parse_list
+from scrape_common import fetch_soup, sleep_with_jitter
+
+BASE = "https://suumo.jp"
+CFG = yaml.safe_load(open(Path(__file__).parent / "config.yaml"))
+EK_CODES = CFG["ek_codes"]
+
+def init_db(rebuild=False):
+    """互換維持用ラッパー。実体はdb.initialize_db。"""
+    initialize_db(rebuild=rebuild)
+
+
+def over_cap(rent_yen, chinryo_max):
+    """家賃が上限（万円指定）を超えるか。
+
+    SUUMO の fr_chinryomax パラメータは駅ページでは無効（付けても
+    結果が変わらないことを実地確認済み）なので、取得側で弾く。
+    """
+    return bool(chinryo_max and rent_yen
+                and rent_yen > chinryo_max * 10000)
+
+
+def list_url(page, ek, chinryo_max):
+    u = f"{BASE}/chintai/osaka/{ek}/?fr_chinryomax={chinryo_max}"
+    if page > 1:
+        u += f"&page={page}"
+    return u
+
+
+def fetch(url: str, retry: int = 3) -> BeautifulSoup:
+    """一覧URL取得。429/5xxを再試行。"""
+    return fetch_soup(url, retry=retry, retry_delay=5)
+
+
+def _get_or_create_building(con, r):
+    na = normalize_address(r["address"])
+    nn = normalize_building_name(r["name"]) or r["name"]
+    row = con.execute("SELECT id,age_years,structure,floors FROM buildings"
+                      " WHERE norm_address=? AND norm_name=?", (na, nn)).fetchone()
+    if row:
+        con.execute("UPDATE buildings SET age_years=COALESCE(?,age_years),"
+                    " structure=COALESCE(?,structure), floors=COALESCE(?,floors)"
+                    " WHERE id=?", (r["age_years"], r.get("structure"),
+                                    r["floors"], row[0]))
+        return row[0]
+    con.execute("INSERT INTO buildings(norm_address,name,norm_name,age_years,"
+                "structure,floors) VALUES(?,?,?,?,?,?)",
+                (na, r["name"], nn, r["age_years"], r.get("structure"),
+                 r["floors"]))
+    return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def _get_or_create_unit(con, bid, r):
+    if not r["area_m2"]:
+        return None
+    row = con.execute(
+        "SELECT id FROM units WHERE building_id=? AND layout=? "
+        "AND abs(area_m2-?)<=0.3 AND (floor IS ? OR floor=?)",
+        (bid, r["layout"], r["area_m2"], r["floor"], r["floor"])).fetchone()
+    if row:
+        return row[0]
+    con.execute("INSERT INTO units(building_id,floor,area_m2,layout,direction)"
+                " VALUES(?,?,?,?,?)",
+                (bid, r["floor"], r["area_m2"], r["layout"], r.get("direction")))
+    return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def _save_stations(con, uid, stations, nearest):
+    if not uid:
+        return
+    seen = set()
+    for s in stations or []:
+        seen.add((s["name"], s["line"]))
+        con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,walk_min)"
+                    " VALUES(?,?,?,?)", (uid, s["name"], s["line"], s["walk"]))
+    if not stations and nearest.get("name"):
+        con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,walk_min)"
+                    " VALUES(?,?,?,?)",
+                    (uid, nearest["name"], nearest.get("line"), nearest["walk"]))
+
+
+def save(rows):
+    """一覧取得行を properties と正規化テーブルへ upsert。"""
+    con = connect_db()
+    n = 0
+    for r in rows:
+        if not r["url"]:
+            continue
+        bid = _get_or_create_building(con, r)
+        uid = _get_or_create_unit(con, bid, r)
+        _save_stations(con, uid, r["stations"], r["nearest"])
+        rent, admin = r["rent_yen"], r["admin_yen"]
+        total = (rent or 0) + (admin or 0)
+        row = con.execute("SELECT id FROM listings WHERE url=?",
+                          (r["url"],)).fetchone()
+        if row:
+            lid = row[0]
+            con.execute("UPDATE listings SET unit_id=?,rent_yen=?,admin_yen=?,"
+                        "shikikin=?,reikin=?,last_seen=datetime('now',"
+                        "'localtime'),active=1 WHERE id=?",
+                        (uid, rent, admin, str(r["shikikin_yen"]),
+                         str(r["reikin_yen"]), lid))
+        else:
+            con.execute(
+                "INSERT INTO listings(unit_id,site,url,rent_yen,admin_yen,"
+                "shikikin,reikin,last_seen,active) VALUES(?,?,?,?,?,?,?,"
+                "datetime('now','localtime'),1)",
+                (uid, "suumo", r["url"], rent, admin,
+                 str(r["shikikin_yen"]), str(r["reikin_yen"])))
+            lid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
+        con.execute("INSERT OR IGNORE INTO costs(listing_id,key_money_yen,"
+                    "deposit_yen,fetched) VALUES(?,?,?,0)",
+                    (lid, r["reikin_yen"], r["shikikin_yen"]))
+        # ON CONFLICT で更新する。INSERT OR REPLACE だと行が作り直され、
+        # 詳細取得で入れた equipment / has_bathtub が一覧の再取得のたびに
+        # 消えてしまうため、一覧由来の列だけを更新する。
+        con.execute(
+            "INSERT INTO properties(name,address,station,walk_min,"
+            "age_years,room_floor,rent_yen,admin_yen,total_yen,shikikin_yen,"
+            "reikin_yen,layout,area_m2,direction,structure,floors,detail_url,"
+            "scraped_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+            "datetime('now','localtime'))"
+            " ON CONFLICT(detail_url) DO UPDATE SET"
+            " name=excluded.name,address=excluded.address,"
+            " station=excluded.station,walk_min=excluded.walk_min,"
+            " age_years=excluded.age_years,room_floor=excluded.room_floor,"
+            " rent_yen=excluded.rent_yen,admin_yen=excluded.admin_yen,"
+            " total_yen=excluded.total_yen,"
+            " shikikin_yen=excluded.shikikin_yen,"
+            " reikin_yen=excluded.reikin_yen,layout=excluded.layout,"
+            " area_m2=excluded.area_m2,direction=excluded.direction,"
+            " structure=excluded.structure,floors=excluded.floors,"
+            " scraped_at=excluded.scraped_at",
+            (r["name"], r["address"], r["nearest"]["name"],
+             r["nearest"]["walk"], r["age_years"], r["floor"], rent, admin,
+             total, r["shikikin_yen"], r["reikin_yen"], r["layout"],
+             r["area_m2"], r.get("direction"), r.get("structure"),
+             r["floors"], r["url"]))
+        n += 1
+    con.commit()
+    con.close()
+    return n
+
+
+def deactivate_stale(days=7):
+    """一定日数見ていない listings を active=0 にする。
+
+    従来は active=0 への遷移が無く、募集終了した物件が母集団に
+    残り続けて割安判定を汚していた。再び一覧に現れれば save() が
+    active=1 に戻す。全駅を回す通常実行のときだけ呼ぶこと
+    （一部駅だけの実行で他駅の物件を落とさないため）。
+    """
+    con = connect_db()
+    cur = con.execute(
+        "UPDATE listings SET active=0 WHERE active=1"
+        " AND last_seen < datetime('now','localtime',?)",
+        (f"-{days} days",))
+    con.commit()
+    n = cur.rowcount
+    con.close()
+    return n
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--max-pages", type=int, default=3)
+    ap.add_argument("--chinryo-max", type=int, default=12)
+    ap.add_argument("--stations", nargs="*", default=None,
+                    help="省略時は config.yaml の全駅")
+    ap.add_argument("--rebuild", action="store_true", help="全テーブル再作成")
+    ap.add_argument("--list-html", type=Path,
+                    help="保存済み一覧HTMLを解析(ネットワーク不要)")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--sleep", type=float, default=3.0,
+                    help="1ページ毎の待機秒(負荷軽減)")
+    ap.add_argument("--jitter", type=float, default=1.5,
+                    help="待機に加えるランダム幅(秒)")
+    ap.add_argument("--stale-days", type=int, default=7,
+                    help="この日数見ていない listings を active=0 にする"
+                         "（全駅実行時のみ）")
+    a = ap.parse_args()
+
+    init_db(rebuild=a.rebuild)
+
+    if a.list_html:
+        rows = parse_list(BeautifulSoup(a.list_html.read_text(), "lxml"))
+        rows = [r for r in rows
+                if not over_cap(r["rent_yen"], a.chinryo_max)]
+        print(f"{a.list_html.name}: {len(rows)} rooms")
+        if not a.dry_run:
+            print("saved", save(rows))
+        return
+
+    targets = a.stations or list(EK_CODES)
+    total = 0
+    for stn in targets:
+        ek = EK_CODES.get(stn)
+        if not ek:
+            print(f"[skip] unknown station: {stn}")
+            continue
+        for page in range(1, a.max_pages + 1):
+            url = list_url(page, ek, a.chinryo_max)
+            try:
+                soup = fetch(url)
+            except Exception as e:
+                print(f"[list error] {stn} p{page}: {str(e)[:100]}")
+                break
+            raw = parse_list(soup, focus_station=stn)
+            if not raw:
+                break
+            rows = [r for r in raw
+                    if not over_cap(r["rent_yen"], a.chinryo_max)]
+            print(f"[list] {stn} p{page}: {len(rows)} rooms"
+                  f" (cap drop {len(raw) - len(rows)})")
+            if not a.dry_run:
+                save(rows)
+            total += len(rows)
+            sleep_with_jitter(a.sleep, a.jitter)
+    if not a.dry_run and not a.stations:
+        n = deactivate_stale(a.stale_days)
+        print(f"deactivated stale listings: {n} (>{a.stale_days} days)")
+    print(f"done: {total} rooms -> {DB}")
+
+
+if __name__ == "__main__":
+    main()
