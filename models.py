@@ -1,5 +1,4 @@
 """実質費用・湯船5段階判定・100点スコア"""
-import re
 import unicodedata
 import yaml
 from pathlib import Path
@@ -31,14 +30,6 @@ def _strip_excluded(t):
     return t
 
 
-def nfkc(s):
-    return unicodedata.normalize("NFKC", s or "").replace(" ", " ")
-
-    def _strip_excluded(t):
-        for k in EXC:
-            t = t.replace(k, "")
-        return t
-
 def _get_text_sources(d):
     """Get all available text sources from detail parse result for tub judgment."""
     sources = []
@@ -57,43 +48,42 @@ def _get_text_sources(d):
     return sources
 
 
-def judge_tub(d):
-    """-> (status, keyword, confidence)
-    
-    Evaluate bathtub status from multiple text sources in detail parse result.
-    Priority: equipment -> note -> full text.
-    """
-    sources = _get_text_sources(d)
-    t = ""
-    for s in sources:
-        t += " " + s
-    t = _strip_excluded(t)
-
-    # Confirmed no tub: explicit "no tub" keywords
+def _judge_text(t):
+    """1つのテキスト源だけを判定。キーワード無しは None。"""
+    t = _strip_excluded(t or "")
     for kw in CFG["tub"]["confirmed_no"]:
         if kw in t:
             return "confirmed_no_tub", kw, 0.95
-
-    # Confirmed has tub: explicit "has tub" keywords + "追い焚き/追焚" (recirculation)
     for kw in CFG["tub"]["confirmed_yes"]:
         if kw in t:
             return "confirmed_tub", kw, 0.95
-
-    # Likely no tub: shower room / shower booth only
     for kw in CFG["tub"]["likely_no"]:
         if kw in t:
             return "likely_no_tub", kw, 0.6
-
-    # Likely has tub: "バス・トイレ別", "バスルーム", etc.
     for kw in CFG["tub"]["likely_yes"]:
         if kw in t:
             return "likely_tub", kw, 0.6
+    return None
 
-    # Fallback: if "バストイレ別" appears without likely_yes keywords, 
-    # it's ambiguous - default to unknown to avoid misclassification
-    if "バストイレ別" in t or "バス・トイレ別" in t:
-        return "unknown", "", 0.0
 
+def judge_tub(d):
+    """-> (status, keyword, confidence)
+
+    情報源ごとに判定し、設備 -> 備考 -> 全文の優先順で最初に
+    判定が付いた源を採用する。従来は全源を混ぜて先勝ち判定だったため、
+    設備に「ユニットバス」とあっても備考の「シャワーのみ」で
+    湯船なし確定になるような矛盾が起きていた。
+    """
+    if isinstance(d, str):
+        sources = [d]
+    elif isinstance(d, dict):
+        sources = _get_text_sources(d)
+    else:
+        sources = []
+    for s in sources:
+        r = _judge_text(s)
+        if r:
+            return r
     return "unknown", "", 0.0
 
 def score_unit(u, weights=None):
@@ -112,20 +102,23 @@ def score_unit(u, weights=None):
     s += w["total"] * max(0, 1 - (total - (must - 20000)) / 20000) \
         if total > must - 20000 else w["total"]
     reasons.append(f"total {total}")
-    # 湯船20点: config重みで按分
-    tub_full = w["tub"]
-    tub_map = {"confirmed_no_tub": 1.0, "likely_no_tub": 0.6,
-               "unknown": 0.0, "likely_tub": 0.0, "confirmed_tub": 0.0}
+    # 湯船: config の tub_scores をカテゴリ最大値比として使う
+    # （従来は同じ比率がコードにハードコードされ config が効かなかった）
+    tub_scores = R.get("tub_scores") or {}
     ts = u.get("tub_status", "unknown")
-    s += tub_full * tub_map.get(ts, 0)
+    if tub_scores:
+        top = max(tub_scores.values()) or 1
+        s += w["tub"] * (tub_scores.get(ts, 0) / top)
     reasons.append(f"tub {ts}")
-    # 交通15点
+    # 交通: config の transit_walk5/walk10 の比率で按分
     wk = u.get("walk_min")
     if wk is not None:
+        t5 = R.get("transit_walk5") or 8
+        t10 = R.get("transit_walk10") or 4
         if wk <= 5:
             s += w["transit"]; reasons.append("walk<=5")
         elif wk <= 10:
-            s += w["transit"] * 0.5; reasons.append("walk<=10")
+            s += w["transit"] * (t10 / t5); reasons.append("walk<=10")
     # 広さ10点: 20m2で満点、15m2で0へ線形
     area = u.get("area") or 0
     s += w["size"] * min(1, max(0, (area - 15) / 5))
@@ -139,12 +132,14 @@ def score_unit(u, weights=None):
     if (u.get("floor") or 2) <= 1:
         nz += R["penalty_1f"]; reasons.append("1F-5")
     s += max(0, nz)
-    # 設備8点: 無料ネット4+独立洗面4
+    # 設備: config の free_net / washstand（合計はカテゴリ重みで頭打ち）
     eq = u.get("equip") or ""
+    eq_pts = 0.0
     if "無料" in eq and "インターネット" in eq:
-        s += w["equip"] / 2; reasons.append("free-net")
+        eq_pts += R.get("free_net", w["equip"] / 2); reasons.append("free-net")
     if "独立" in eq and "洗面" in eq:
-        s += w["equip"] / 2; reasons.append("washstand")
+        eq_pts += R.get("washstand", w["equip"] / 2); reasons.append("washstand")
+    s += min(eq_pts, w["equip"])
     # 防災防犯7点: 新耐震・オートロック・2階以上で加点、欠損で減点
     sf = 0.0
     if u.get("new_seismic"):
