@@ -207,6 +207,47 @@ def _guarantee_rate(text):
     return None
 
 
+def _yen_or_ratio(text, rent):
+    """金額テキスト -> 円。'9.9万円' 等の実額を優先し、無ければ
+    '賃料の1ヶ月分' '55%' のような賃料比を rent から換算する。
+    'なし/不要/無料' は 0。判定不能は None。"""
+    t = nfkc(text or "")
+    if not t:
+        return None
+    if any(k in t for k in ("なし", "不要", "無料")) \
+            and not re.search(r"[\d,]+\s*(?:万円|円)", t):
+        return 0
+    m = re.search(r"([\d,]+(?:\.\d+)?)\s*万円", t)
+    if m:
+        return int(round(float(m.group(1).replace(",", "")) * 10000))
+    m = re.search(r"([\d,]+)\s*円", t)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    if not rent:
+        return None
+    m = re.search(r"([\d.]+)\s*(?:ヶ月|か月|カ月)(?:分)?", t)
+    if m:
+        return int(rent * float(m.group(1)))
+    m = re.search(r"([\d.]+)\s*[%％]", t)
+    if m:
+        return int(rent * float(m.group(1)) / 100)
+    return None
+
+
+def _agency_yen(g, other, full, price_raw, rent):
+    """仲介手数料。概要表の独立セル / 価格欄の行 / ほか初期費用 /
+    全文のラベル近傍、の順に探す。従来は未取得で costs.agency_yen が
+    常に NULL になり、実質総額が過小評価されていた。"""
+    for src in (price_raw, g.get("仲介手数料"), other):
+        v = _yen_or_ratio(src, rent)
+        if v is not None:
+            return v
+    idx = (full or "").find("仲介手数料")
+    if idx >= 0:
+        return _yen_or_ratio(full[idx: idx + 40], rent)
+    return None
+
+
 AMENITY_HINT = (
     "バストイレ別", "エアコン", "オートロック", "独立洗面",
     "宅配ボックス", "バルコニー", "フローリング", "浴室",
@@ -245,7 +286,7 @@ def parse_detail(soup):
     info = soup.select_one(".property_view_note-info") \
         or soup.select_one(".property_view_note")
     price = {"rent": None, "admin": None, "deposit": None, "key_money": None,
-             "hoshoukin": None, "shoukyaku": None}
+             "hoshoukin": None, "shoukyaku": None, "agency_raw": None}
     if info:
         for line in [x.strip() for x in nfkc(info.get_text("\n")).split("\n")
                      if x.strip()]:
@@ -259,6 +300,8 @@ def parse_detail(soup):
                 price["hoshoukin"] = to_yen(line.split(":", 1)[-1])
             elif line.startswith(("敷引", "償却")):
                 price["shoukyaku"] = to_yen(line.split(":", 1)[-1])
+            elif line.startswith("仲介手数料"):
+                price["agency_raw"] = line.split(":", 1)[-1]
             elif price["rent"] is None and ("万円" in line or "円" in line):
                 price["rent"] = to_yen(line)
 
@@ -273,6 +316,11 @@ def parse_detail(soup):
     contract = g.get("契約期間") or ""
     cm = re.search(r"(\d+)年", contract)
     months = int(cm.group(1)) * 12 if cm else None
+    # 保証会社の更新料と契約の更新料は別物。従来は両列に同じ値を
+    # 入れていたため実質月額で二重計上されていた。
+    guarantee_renew_yen = _find_yen(g.get("保証会社") or "", r"更新料")
+    renewal_fee_yen = _find_yen(contract, r"更新料") \
+        or _find_yen(other, r"更新手数料")
 
     return {
         "rent_yen": rent,
@@ -287,7 +335,9 @@ def parse_detail(soup):
         "support_yen": _find_yen(other, r"(サポート|CLUB|プレサポ|除菌消臭|安心)"),
         "guarantee_first_yen": (int(rent * guarantee_rate / 100)
                                 if rent and guarantee_rate else None),
-        "renewal_fee_yen": _find_yen(g.get("保証会社") or "", r"更新料"),
+        "guarantee_renew_yen": guarantee_renew_yen,
+        "agency_yen": _agency_yen(g, other, full, price["agency_raw"], rent),
+        "renewal_fee_yen": renewal_fee_yen,
         "water_fixed_yen": _find_yen(full, r"水道代"),
         "contract_months": months,
         "regular_lease": 0 if "定期借家" in full else 1,
