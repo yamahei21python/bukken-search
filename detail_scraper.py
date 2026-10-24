@@ -119,6 +119,44 @@ def apply_detail(con, lid, uid, url, d):
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
                 (status, conf, d["direction"], uid))
+    # 詳細側の駅情報を stations へマージする（従来は parse しても
+    # 捨てていた）。詳細の徒歩は一覧より正確なことが多く、一覧に
+    # 無い駅も拾える。詳細値を正として既存行も更新する。
+    for s in d.get("stations") or []:
+        if not s.get("name"):
+            continue
+        con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,"
+                    "walk_min) VALUES(?,?,?,?)",
+                    (uid, s["name"], s.get("line") or "", s.get("walk")))
+        if s.get("walk") is not None:
+            con.execute("UPDATE stations SET walk_min=? WHERE unit_id=?"
+                        " AND name=? AND line=?",
+                        (s["walk"], uid, s["name"], s.get("line") or ""))
+    near = con.execute("SELECT name, walk_min FROM stations"
+                       " WHERE unit_id=? AND walk_min IS NOT NULL"
+                       " ORDER BY walk_min LIMIT 1", (uid,)).fetchone()
+    if near:
+        con.execute("UPDATE properties SET station=?, walk_min=?"
+                    " WHERE detail_url=?",
+                    (near[0], near[1], canonical_url(url)))
+    # 建物設備フラグ（言及がある場合のみ立てる。無言及は NULL のまま）
+    equip = d.get("equipment") or ""
+    bflags = {}
+    if "オートロック" in equip:
+        bflags["autolock"] = 1
+    if "エレベーター" in equip:
+        bflags["elevator"] = 1
+    if "宅配ボックス" in equip or "宅配BOX" in equip:
+        bflags["delivery_box"] = 1
+    if bflags:
+        bid = con.execute("SELECT building_id FROM units WHERE id=?",
+                          (uid,)).fetchone()
+        if bid:
+            sets = ",".join(f"{k}=?" for k in bflags)
+            con.execute(f"UPDATE buildings SET {sets} WHERE id=?",
+                        (*bflags.values(), bid[0]))
+    if "角部屋" in equip:
+        con.execute("UPDATE units SET corner=1 WHERE id=?", (uid,))
     con.execute("DELETE FROM listing_snapshots WHERE listing_id=?"
                 " AND date(fetched_at)=date('now','localtime')", (lid,))
     con.execute("INSERT INTO listing_snapshots(listing_id,rent_yen,admin_yen,"
