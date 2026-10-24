@@ -5,7 +5,10 @@ DB = Path(__file__).parent / "bukken.db"
 ap = argparse.ArgumentParser()
 ap.add_argument("--max-rent", type=int, default=70000)
 ap.add_argument("--include-admin", action="store_true", help="管理費込みで判定")
-ap.add_argument("--no-bathtub", action="store_true")
+ap.add_argument("--no-bathtub", action="store_true",
+                help="湯船なし（likely含む。properties.has_bathtub=0 で判定）")
+ap.add_argument("--no-bathtub-confirmed", action="store_true",
+                help="湯船なし確定のみ（units.tub_status で判定）")
 ap.add_argument("--walk-max", type=int, default=None)
 ap.add_argument("--max-age", type=int, default=None)
 ap.add_argument("--min-area", type=float, default=None)
@@ -16,6 +19,10 @@ q = f"SELECT name,rent_yen,admin_yen,total_yen,layout,area_m2,walk_min,age_years
 params = [a.max_rent]
 if a.no_bathtub:
     q += "AND has_bathtub=0 "
+if a.no_bathtub_confirmed:
+    q += ("AND detail_url IN (SELECT l.url FROM listings l"
+          " JOIN units u ON u.id=l.unit_id"
+          " WHERE u.tub_status='confirmed_no_tub') ")
 if a.walk_max is not None:
     q += "AND walk_min<=? "
     params.append(a.walk_max)

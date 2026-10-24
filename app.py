@@ -13,14 +13,14 @@ tub = st.multiselect("湯船状態", ["confirmed_no_tub", "likely_no_tub", "unkn
 con = sqlite3.connect(DB)
 try:
     df = pd.read_sql_query(
-        """SELECT b.name, l.rent_yen, l.admin_yen, l.rent_yen+l.admin_yen total,
+        """SELECT b.name, l.rent_yen, l.admin_yen, l.rent_yen+COALESCE(l.admin_yen,0) total,
            u.layout, u.area_m2, u.floor, u.tub_status, l.url,
-           (SELECT walk_min FROM stations s WHERE s.unit_id=u.id LIMIT 1) walk_min,
+           (SELECT MIN(walk_min) FROM stations s WHERE s.unit_id=u.id) walk_min,
            (SELECT quote FROM evidence e WHERE e.unit_id=u.id ORDER BY e.checked_at DESC LIMIT 1) evidence
            FROM listings l JOIN units u ON u.id=l.unit_id
            JOIN buildings b ON b.id=u.building_id WHERE l.active=1""", con)
 except Exception as e:
-    st.error(f"migrate.py を先に実行してください: {e}")
+    st.error(f"DBのスキーマが想定と違います（db_audit.py で状態を確認できます）: {e}")
     st.stop()
 df = df[df["total"] <= max_total]
 if tub:

@@ -13,7 +13,6 @@
   python3 scraper.py --list-html path/to/list.html     # 保存済みHTMLを解析(オフライン)
 """
 import argparse
-import time
 from pathlib import Path
 
 import yaml
@@ -32,6 +31,16 @@ def init_db(rebuild=False):
     initialize_db(rebuild=rebuild)
 
 
+def over_cap(rent_yen, chinryo_max):
+    """家賃が上限（万円指定）を超えるか。
+
+    SUUMO の fr_chinryomax パラメータは駅ページでは無効（付けても
+    結果が変わらないことを実地確認済み）なので、取得側で弾く。
+    """
+    return bool(chinryo_max and rent_yen
+                and rent_yen > chinryo_max * 10000)
+
+
 def list_url(page, ek, chinryo_max):
     u = f"{BASE}/chintai/osaka/{ek}/?fr_chinryomax={chinryo_max}"
     if page > 1:
@@ -44,9 +53,20 @@ def fetch(url: str, retry: int = 3) -> BeautifulSoup:
     return fetch_soup(url, retry=retry, retry_delay=5)
 
 
+def _is_descriptive_name(name):
+    """SUUMO見出しの「路線 駅 階建 築年」説明名かどうか。"""
+    n = name or ""
+    return "駅" in n and ("階建" in n or "築" in n)
+
+
 def _get_or_create_building(con, r):
     na = normalize_address(r["address"])
     nn = normalize_building_name(r["name"]) or r["name"]
+    if _is_descriptive_name(r["name"]):
+        # 説明名は除去パターンをすり抜ける表記ゆれ（大阪メトロ表記、
+        # 地下1地上〜階建、新築など）で同一建物が分裂するため、
+        # 住所+階建+築年 の合成キーを照合キーにする
+        nn = f"__desc__|{r['floors']}|{r['age_years']}"
     row = con.execute("SELECT id,age_years,structure,floors FROM buildings"
                       " WHERE norm_address=? AND norm_name=?", (na, nn)).fetchone()
     if row:
@@ -67,8 +87,11 @@ def _get_or_create_unit(con, bid, r):
         return None
     row = con.execute(
         "SELECT id FROM units WHERE building_id=? AND layout=? "
-        "AND abs(area_m2-?)<=0.3 AND (floor IS ? OR floor=?)",
-        (bid, r["layout"], r["area_m2"], r["floor"], r["floor"])).fetchone()
+        "AND abs(area_m2-?)<=0.3 AND (floor IS ? OR floor=?)"
+        " AND (direction IS ? OR direction=? OR ? IS NULL)",
+        (bid, r["layout"], r["area_m2"], r["floor"], r["floor"],
+         r.get("direction"), r.get("direction"),
+         r.get("direction"))).fetchone()
     if row:
         return row[0]
     con.execute("INSERT INTO units(building_id,floor,area_m2,layout,direction)"
@@ -108,27 +131,51 @@ def save(rows):
         if row:
             lid = row[0]
             con.execute("UPDATE listings SET unit_id=?,rent_yen=?,admin_yen=?,"
-                        "shikikin=?,reikin=?,last_seen=datetime('now',"
-                        "'localtime'),active=1 WHERE id=?",
+                        "shikikin=?,reikin=?,last_seen=datetime('now'),"
+                        "active=1 WHERE id=?",
                         (uid, rent, admin, str(r["shikikin_yen"]),
                          str(r["reikin_yen"]), lid))
         else:
             con.execute(
                 "INSERT INTO listings(unit_id,site,url,rent_yen,admin_yen,"
                 "shikikin,reikin,last_seen,active) VALUES(?,?,?,?,?,?,?,"
-                "datetime('now','localtime'),1)",
+                "datetime('now'),1)",
                 (uid, "suumo", r["url"], rent, admin,
                  str(r["shikikin_yen"]), str(r["reikin_yen"])))
             lid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
         con.execute("INSERT OR IGNORE INTO costs(listing_id,key_money_yen,"
                     "deposit_yen,fetched) VALUES(?,?,?,0)",
                     (lid, r["reikin_yen"], r["shikikin_yen"]))
+        # ON CONFLICT で更新する。INSERT OR REPLACE だと行が作り直され、
+        # 詳細取得で入れた equipment / has_bathtub が一覧の再取得のたびに
+        # 消えてしまうため、一覧由来の列だけを更新する。
         con.execute(
-            "INSERT OR REPLACE INTO properties(name,address,station,walk_min,"
+            "INSERT INTO properties(name,address,station,walk_min,"
             "age_years,room_floor,rent_yen,admin_yen,total_yen,shikikin_yen,"
             "reikin_yen,layout,area_m2,direction,structure,floors,detail_url,"
             "scraped_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-            "datetime('now','localtime'))",
+            "datetime('now'))"
+            " ON CONFLICT(detail_url) DO UPDATE SET"
+            " name=excluded.name,address=excluded.address,"
+            # 徒歩は「最寄り」なので小さい方を残す（詳細で判明した
+            # より正確な徒歩を、一覧の粗い値で戻さないため）
+            " station=CASE WHEN excluded.walk_min IS NOT NULL"
+            " AND (properties.walk_min IS NULL"
+            " OR excluded.walk_min<properties.walk_min)"
+            " THEN excluded.station ELSE properties.station END,"
+            " walk_min=CASE WHEN excluded.walk_min IS NULL"
+            " THEN properties.walk_min"
+            " WHEN properties.walk_min IS NULL THEN excluded.walk_min"
+            " WHEN excluded.walk_min<properties.walk_min"
+            " THEN excluded.walk_min ELSE properties.walk_min END,"
+            " age_years=excluded.age_years,room_floor=excluded.room_floor,"
+            " rent_yen=excluded.rent_yen,admin_yen=excluded.admin_yen,"
+            " total_yen=excluded.total_yen,"
+            " shikikin_yen=excluded.shikikin_yen,"
+            " reikin_yen=excluded.reikin_yen,layout=excluded.layout,"
+            " area_m2=excluded.area_m2,direction=excluded.direction,"
+            " structure=excluded.structure,floors=excluded.floors,"
+            " scraped_at=excluded.scraped_at",
             (r["name"], r["address"], r["nearest"]["name"],
              r["nearest"]["walk"], r["age_years"], r["floor"], rent, admin,
              total, r["shikikin_yen"], r["reikin_yen"], r["layout"],
@@ -136,6 +183,25 @@ def save(rows):
              r["floors"], r["url"]))
         n += 1
     con.commit()
+    con.close()
+    return n
+
+
+def deactivate_stale(days=7):
+    """一定日数見ていない listings を active=0 にする。
+
+    従来は active=0 への遷移が無く、募集終了した物件が母集団に
+    残り続けて割安判定を汚していた。再び一覧に現れれば save() が
+    active=1 に戻す。全駅を回す通常実行のときだけ呼ぶこと
+    （一部駅だけの実行で他駅の物件を落とさないため）。
+    """
+    con = connect_db()
+    cur = con.execute(
+        "UPDATE listings SET active=0 WHERE active=1"
+        " AND last_seen < datetime('now',?)",
+        (f"-{days} days",))
+    con.commit()
+    n = cur.rowcount
     con.close()
     return n
 
@@ -154,12 +220,17 @@ def main():
                     help="1ページ毎の待機秒(負荷軽減)")
     ap.add_argument("--jitter", type=float, default=1.5,
                     help="待機に加えるランダム幅(秒)")
+    ap.add_argument("--stale-days", type=int, default=7,
+                    help="この日数見ていない listings を active=0 にする"
+                         "（全駅実行時のみ）")
     a = ap.parse_args()
 
     init_db(rebuild=a.rebuild)
 
     if a.list_html:
         rows = parse_list(BeautifulSoup(a.list_html.read_text(), "lxml"))
+        rows = [r for r in rows
+                if not over_cap(r["rent_yen"], a.chinryo_max)]
         print(f"{a.list_html.name}: {len(rows)} rooms")
         if not a.dry_run:
             print("saved", save(rows))
@@ -179,14 +250,20 @@ def main():
             except Exception as e:
                 print(f"[list error] {stn} p{page}: {str(e)[:100]}")
                 break
-            rows = parse_list(soup, focus_station=stn)
-            print(f"[list] {stn} p{page}: {len(rows)} rooms")
-            if not rows:
+            raw = parse_list(soup, focus_station=stn)
+            if not raw:
                 break
+            rows = [r for r in raw
+                    if not over_cap(r["rent_yen"], a.chinryo_max)]
+            print(f"[list] {stn} p{page}: {len(rows)} rooms"
+                  f" (cap drop {len(raw) - len(rows)})")
             if not a.dry_run:
                 save(rows)
             total += len(rows)
             sleep_with_jitter(a.sleep, a.jitter)
+    if not a.dry_run and not a.stations:
+        n = deactivate_stale(a.stale_days)
+        print(f"deactivated stale listings: {n} (>{a.stale_days} days)")
     print(f"done: {total} rooms -> {DB}")
 
 
