@@ -58,6 +58,53 @@ class TestParseDetail(unittest.TestCase):
         d = parse_detail(BeautifulSoup(html, "lxml"))
         self.assertIsNone(d["admin_yen"])
 
+    def _with_other(self, other, price_lines="7.05万円\n管理費: 11000円\n"):
+        return ("<html><body><div class='property_view_note-info'>\n"
+                + price_lines + "</div>"
+                "<table class='table_gaiyou'><tr><th>ほか初期費用</th>"
+                f"<td>{other}</td></tr></table></body></html>")
+
+    def test_agency_not_from_other_total(self):
+        # 「合計X万円（内訳：…）」の合計額を仲介手数料と誤認しない
+        html = self._with_other(
+            "合計14.3万円（内訳：鍵交換代3.3万円 クリーニング費5.5万円）")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["agency_yen"])
+        self.assertEqual(d["key_exchange_yen"], 33000)
+        self.assertEqual(d["cleaning_yen"], 55000)
+
+    def test_agency_labeled(self):
+        html = self._with_other("仲介手数料：5.94万円",
+                                "5.4万円\n管理費: 5000円\n")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertEqual(d["agency_yen"], 59400)
+
+    def test_agency_over_cap(self):
+        # 仲介手数料は賃料の1.1ヶ月分が上限。超過は誤読として捨てる
+        html = ("<html><body><div class='property_view_note-info'>\n"
+                "7万円\n管理費: 5000円\n仲介手数料: 20万円\n"
+                "</div></body></html>")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["agency_yen"])
+
+    def test_deposit_absurd_guard(self):
+        # 円額を万円欄に入力した誤記（敷金: 435600万円）を通さない
+        html = ("<html><body><div class='property_view_note-info'>\n"
+                "6.6万円\n管理費: 7000円\n敷金: 435600万円\n"
+                "</div></body></html>")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["deposit_yen"])
+
+    def test_support_glued_number_guard(self):
+        # 商品名末尾の数字と金額の連結誤読（241.65万円）は合計超過で捨てる
+        html = self._with_other(
+            "合計5.5万円（内訳：アクト安心ライフ241.65万円"
+            " あっとくらぶ1.1万円 鍵交換代2.75万円）",
+            "6.2万円\n管理費: 8000円\n")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["support_yen"])
+        self.assertEqual(d["key_exchange_yen"], 27500)
+
 
 class TestScore(unittest.TestCase):
     def test_score_uses_config(self):
