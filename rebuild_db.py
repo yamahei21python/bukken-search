@@ -58,6 +58,14 @@ def main():
 
     stamp = datetime.now().strftime("%Y%m%d%H%M%S")
     backup = a.db.with_name(f"{a.db.stem}_backup_{stamp}.db")
+    # WAL の未チェックポイント分がバックアップから漏れないよう、
+    # コピー前にチェックポイントを済ませる
+    _con = sqlite3.connect(a.db)
+    try:
+        _con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        _con.commit()
+    finally:
+        _con.close()
     shutil.copy2(a.db, backup)
     print(f"backup: {backup}")
 
