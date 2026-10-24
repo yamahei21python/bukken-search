@@ -30,15 +30,33 @@ def fetch(url: str, retry: int = 3) -> BeautifulSoup:
     return fetch_soup(url, retry=retry, retry_delay=2)
 
 
-def targets(con, limit, only_missing):
+def targets(con, limit, only_missing, max_total=100000, walk_max=10):
+    """詳細取得の対象を「本命候補から先に」返す。
+
+    従来は id 順（=古い順）で、総額超過や徒歩圏外の物件にも取得枠を
+    使い、候補の取得率が上がらなかった。優先順位:
+      1. 総額(賃料+管理費) <= max_total かつ 最寄り駅まで徒歩<=walk_max
+      2. 総額 <= max_total
+      3. その他
+    同順位内は徒歩が近い順 → last_seen が新しい順。
+    """
     q = ("SELECT l.id, l.url, u.id FROM listings l JOIN units u ON u.id=l.unit_id"
          " LEFT JOIN costs c ON c.listing_id=l.id")
     q += (" WHERE l.active=1 AND (c.fetched IS NULL OR c.fetched=0)"
           if only_missing else
           " WHERE l.active=1 AND (c.fetched IS NULL OR c.fetched=0"
           " OR l.last_seen < datetime('now','-7 days'))")
-    q += " GROUP BY l.id LIMIT ?"
-    return con.execute(q, (limit,)).fetchall()
+    q += (" GROUP BY l.id"
+          " ORDER BY"
+          " CASE WHEN l.rent_yen + l.admin_yen <= ?"
+          " AND EXISTS (SELECT 1 FROM stations s WHERE s.unit_id=u.id"
+          "             AND s.walk_min<=?) THEN 0"
+          " WHEN l.rent_yen + l.admin_yen <= ? THEN 1 ELSE 2 END,"
+          " (SELECT MIN(s2.walk_min) FROM stations s2"
+          "   WHERE s2.unit_id=u.id),"
+          " l.last_seen DESC"
+          " LIMIT ?")
+    return con.execute(q, (max_total, walk_max, max_total, limit)).fetchall()
 
 
 def _find_listing(con, url, fallback_pattern=None):
@@ -78,6 +96,10 @@ def apply_detail(con, lid, uid, url, d):
                 " last_seen=datetime('now','localtime') WHERE id=?",
                 (d["rent_yen"], d["admin_yen"], str(d["deposit_yen"]),
                  str(d["key_money_yen"]), lid))
+    # 注意: 7054c2e でこの UPDATE が壊れていた（存在しないキー
+    # shikikin_yen/reikin_yen を参照し KeyError、placeholder 数も不一致、
+    # WHERE id=listings.id で別物件を更新しうる）。parse_detail の
+    # deposit_yen/key_money_yen を使い、detail_url で引く正しい形に戻す。
     con.execute(
         "UPDATE properties SET rent_yen=COALESCE(?,rent_yen),"
         " admin_yen=COALESCE(?,admin_yen),"
@@ -87,11 +109,13 @@ def apply_detail(con, lid, uid, url, d):
         " equipment=?, has_bathtub=?, no_bathtub_evidence=?,"
         " direction=COALESCE(?,direction),"
         " structure=COALESCE(?,structure), floors=COALESCE(?,floors),"
-        " scraped_at=datetime('now','localtime') WHERE id=?",
-        (d["rent_yen"], d["admin_yen"], str(d["shikikin_yen"]),
-         str(d["reikin_yen"]), d["equipment"], status,
-         d.get("no_bathtub_evidence", "")[:500],
-         d.get("direction"), d.get("structure"), d.get("floors"), lid))
+        " scraped_at=datetime('now','localtime') WHERE detail_url=?",
+        (d["rent_yen"], d["admin_yen"],
+         (d["rent_yen"] or 0) + (d["admin_yen"] or 0) if d["rent_yen"] else None,
+         d["deposit_yen"], d["key_money_yen"], d["equipment"], hb,
+         (kw + " | " + d["equipment"])[:400],
+         d.get("direction"), d.get("structure"), d.get("floors"),
+         canonical_url(url)))
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
                 (status, conf, d["direction"], uid))
@@ -106,22 +130,31 @@ def apply_detail(con, lid, uid, url, d):
                 "confidence) VALUES(?,?,?,?,?,?)",
                 (uid, status, (kw + " | " + d["equipment"][:400]), url,
                  "detail_parse", conf))
+    # 設備テキストを amenities へ分解（従来は未投入で常に0件だった）
+    for name in (d.get("equipment") or "").replace(" ", "").split("、"):
+        name = name.strip()
+        if name:
+            con.execute("INSERT OR IGNORE INTO amenities(unit_id,name)"
+                        " VALUES(?,?)", (uid, name))
     con.execute(
         "INSERT OR REPLACE INTO costs(listing_id,key_money_yen,deposit_yen,"
-        "guarantee_first_yen,guarantee_renew_yen,insurance_yen,key_exchange_yen,"
-        "cleaning_yen,support_yen,water_fixed_yen,renewal_fee_yen,"
-        "contract_months,free_rent_months,regular_lease,fetched,note) VALUES"
-        "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
-        (lid, d["key_money_yen"], d["deposit_yen"], d["guarantee_first_yen"],
-         d["renewal_fee_yen"], d["insurance_yen"], d["key_exchange_yen"],
+        "agency_yen,guarantee_first_yen,guarantee_renew_yen,insurance_yen,"
+        "key_exchange_yen,cleaning_yen,support_yen,water_fixed_yen,"
+        "renewal_fee_yen,contract_months,free_rent_months,regular_lease,"
+        "fetched,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
+        (lid, d["key_money_yen"], d["deposit_yen"], d.get("agency_yen"),
+         d["guarantee_first_yen"], d.get("guarantee_renew_yen"),
+         d["insurance_yen"], d["key_exchange_yen"],
          d["cleaning_yen"], d["support_yen"], d["water_fixed_yen"],
          d["renewal_fee_yen"], d["contract_months"] or 24,
          d["free_rent_months"], d["regular_lease"], note[:500]))
 
 
-def run(limit=50, sleep=5.0, jitter=2.0, only_missing=True, max_seconds=0):
+def run(limit=50, sleep=5.0, jitter=2.0, only_missing=True, max_seconds=0,
+        max_total=100000, walk_max=10):
     con = connect_db()
-    rows = targets(con, limit, only_missing)
+    rows = targets(con, limit, only_missing,
+                   max_total=max_total, walk_max=walk_max)
     print(f"detail targets: {len(rows)} (only_missing={only_missing})")
     start = time.time()
     done = 0
@@ -179,6 +212,10 @@ def main():
                     help="待機に加えるランダム幅(秒)")
     ap.add_argument("--max-seconds", type=int, default=0,
                     help="この秒数を超えたら中断(0=無制限)")
+    ap.add_argument("--max-total", type=int, default=100000,
+                    help="優先取得する総額(賃料+管理費)の上限")
+    ap.add_argument("--walk-max", type=int, default=10,
+                    help="優先取得する最寄り駅までの徒歩分数")
     ap.add_argument("--detail-html", type=Path,
                     help="保存済み詳細HTMLを解析して表示(DB更新なし)")
     ap.add_argument("--detail-dir", type=Path,
@@ -193,7 +230,8 @@ def main():
         run_offline_dir(a.detail_dir)
         return
     run(a.limit, sleep=a.sleep, jitter=a.jitter, only_missing=not a.all,
-        max_seconds=a.max_seconds)
+        max_seconds=a.max_seconds, max_total=a.max_total,
+        walk_max=a.walk_max)
 
 
 if __name__ == "__main__":
