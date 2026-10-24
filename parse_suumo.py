@@ -27,7 +27,10 @@ STRIP_PATTERNS = CFG.get("building_name_strip_patterns", [])
 _NUM = r"([\d,]+(?:\.\d+)?)"
 _DASH = ("", "-", "−", "‐", "―", "－", "‐")
 _STATION_RE = re.compile(
-    r"([^\s/]+?線|[^\s/]+?電鉄|大阪メトロ[^\s/]+)/([^\s/]+?)駅\s*歩\s*(\d+)分")
+    r"([^\s/]+?線|[^\s/]+?電鉄|大阪メトロ[^\s/]+)/([^\s/]+?)駅"
+    r"(?:\s*歩\s*(\d+)分|\s*(\d+)分|\s*歩(\d+)|\s*(\d+)歩|\s*(\d+)分\s*歩)"
+    r"(?:分|\b)"
+)  # closes _STATION_RE
 _LAYOUT_RE = re.compile(r"(ワンルーム|\d[SLDK]{1,4})")
 
 
@@ -106,8 +109,15 @@ def normalize_address(address: str | None) -> str:
 
 def parse_stations(text):
     """'地下鉄中央線/阿波座駅 歩5分 ...' を全件 [{line,name,walk}] へ。"""
-    return [{"line": line, "name": name, "walk": int(walk)}
-            for line, name, walk in _STATION_RE.findall(nfkc(text))]
+    results = _STATION_RE.findall(nfkc(text))
+    out = []
+    for line, name, *walk_vals in results:
+        # walk_vals has 6 entries; use first truthy
+        walk = next((w for w in walk_vals if w), None)
+        if walk is not None:
+            walk = int(walk)
+        out.append({"line": line, "name": name, "walk": walk})
+    return out
 
 
 def parse_list(soup, focus_station=""):
@@ -197,10 +207,15 @@ def _guarantee_rate(text):
     return None
 
 
-AMENITY_HINT = ("バストイレ別", "エアコン", "オートロック", "独立洗面",
-                "宅配ボックス", "バルコニー", "フローリング", "浴室",
-                "洗面", "キッチン", "コンロ", "収納", "インターホン",
-                "エレベーター", "給湯", "洗濯機", "温水洗浄")
+AMENITY_HINT = (
+    "バストイレ別", "エアコン", "オートロック", "独立洗面",
+    "宅配ボックス", "バルコニー", "フローリング", "浴室",
+    "洗面", "キッチン", "コンロ", "収納", "インターホン",
+    "エレベーター", "給湯", "洗濯機", "温水洗浄",
+    "システムキッチン", "室内洗濯機", "クローゼット", "ウォークインクローゼット",
+    "バイク置き場", "駐車場", "浴室乾燥", "シューズボックス", "床暖房",
+    "ガスコンロ", "IHコンロ", "追い焚き", "オートバス",
+)
 
 
 def _equipment_text(soup):
