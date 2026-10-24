@@ -113,7 +113,7 @@ def audit(db_path, max_total=100000, walk_max=10, stale_days=7):
     # --- 陳腐化・混入 ---
     out["stale_active"] = one(
         "SELECT COUNT(*) FROM listings WHERE active=1"
-        " AND last_seen < datetime('now','localtime',?)",
+        " AND last_seen < datetime('now',?)",
         (f"-{stale_days} days",))
     out["last_seen_by_date"] = rows(
         "SELECT date(last_seen) d, COUNT(*) n FROM listings"
