@@ -155,7 +155,21 @@ def apply_detail(con, lid, uid, url, d):
             sets = ",".join(f"{k}=?" for k in bflags)
             con.execute(f"UPDATE buildings SET {sets} WHERE id=?",
                         (*bflags.values(), bid[0]))
-    if "角部屋" in equip:
+    # 建物マスタへも構造・階数を反映する（従来は properties にしか
+    # 書いておらず、buildings.structure が常時 NULL だった）
+    if d.get("structure") or d.get("floors"):
+        bid = con.execute("SELECT building_id FROM units WHERE id=?",
+                          (uid,)).fetchone()
+        if bid:
+            con.execute("UPDATE buildings SET"
+                        " structure=COALESCE(?,structure),"
+                        " floors=COALESCE(?,floors) WHERE id=?",
+                        (d.get("structure"),
+                         str(d["floors"]) if d.get("floors") else None,
+                         bid[0]))
+    # SUUMO の実文言は「角住戸」が主流（「角部屋」だけ見ていたため
+    # 該当735件のうち1件しか立っていなかった）
+    if "角部屋" in equip or "角住戸" in equip:
         con.execute("UPDATE units SET corner=1 WHERE id=?", (uid,))
     con.execute("DELETE FROM listing_snapshots WHERE listing_id=?"
                 " AND date(fetched_at)=date('now')", (lid,))
