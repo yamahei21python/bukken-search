@@ -1,5 +1,6 @@
 """実質費用・湯船5段階判定・100点スコア"""
 import re
+import unicodedata
 import yaml
 from pathlib import Path
 CFG = yaml.safe_load(open(Path(__file__).parent / "config.yaml"))
@@ -20,26 +21,79 @@ def total_2year(rent, admin=0, init_total=0, renewal_fee=0,
 
 EXC = CFG["tub"]["exclude_keywords"]
 
+def nfkc(s):
+    return unicodedata.normalize("NFKC", s or "").replace("\xa0", " ")
+
+
 def _strip_excluded(t):
     for k in EXC:
         t = t.replace(k, "")
     return t
 
-def judge_tub(text):
-    """-> (status, keyword, confidence)"""
-    t = _strip_excluded(text or "")
+
+def nfkc(s):
+    return unicodedata.normalize("NFKC", s or "").replace(" ", " ")
+
+    def _strip_excluded(t):
+        for k in EXC:
+            t = t.replace(k, "")
+        return t
+
+def _get_text_sources(d):
+    """Get all available text sources from detail parse result for tub judgment."""
+    sources = []
+    # Primary: equipment field
+    eq = d.get("equipment") or ""
+    if eq:
+        sources.append(_strip_excluded(eq))
+    # Secondary: note field (contains other initial costs and features)
+    note = d.get("note") or ""
+    if note:
+        sources.append(_strip_excluded(note))
+    # Tertiary: full text from property view table
+    full = nfkc(d.get("full") or "")
+    if full:
+        sources.append(_strip_excluded(full))
+    return sources
+
+
+def judge_tub(d):
+    """-> (status, keyword, confidence)
+    
+    Evaluate bathtub status from multiple text sources in detail parse result.
+    Priority: equipment -> note -> full text.
+    """
+    sources = _get_text_sources(d)
+    t = ""
+    for s in sources:
+        t += " " + s
+    t = _strip_excluded(t)
+
+    # Confirmed no tub: explicit "no tub" keywords
     for kw in CFG["tub"]["confirmed_no"]:
         if kw in t:
             return "confirmed_no_tub", kw, 0.95
+
+    # Confirmed has tub: explicit "has tub" keywords + "追い焚き/追焚" (recirculation)
     for kw in CFG["tub"]["confirmed_yes"]:
         if kw in t:
             return "confirmed_tub", kw, 0.95
+
+    # Likely no tub: shower room / shower booth only
     for kw in CFG["tub"]["likely_no"]:
         if kw in t:
             return "likely_no_tub", kw, 0.6
+
+    # Likely has tub: "バス・トイレ別", "バスルーム", etc.
     for kw in CFG["tub"]["likely_yes"]:
         if kw in t:
             return "likely_tub", kw, 0.6
+
+    # Fallback: if "バストイレ別" appears without likely_yes keywords, 
+    # it's ambiguous - default to unknown to avoid misclassification
+    if "バストイレ別" in t or "バス・トイレ別" in t:
+        return "unknown", "", 0.0
+
     return "unknown", "", 0.0
 
 def score_unit(u, weights=None):

@@ -65,7 +65,7 @@ def _parse_and_apply_detail(con, lid, uid, url, source, include_equipment=False)
 
 
 def apply_detail(con, lid, uid, url, d):
-    status, kw, conf = judge_tub(d["equipment"])
+    status, kw, conf = judge_tub(d)
     hb = _TUB_INT.get(status, -1)
     note = (d.get("note") or "")
     if d.get("hoshoukin_yen") is not None:
@@ -87,12 +87,11 @@ def apply_detail(con, lid, uid, url, d):
         " equipment=?, has_bathtub=?, no_bathtub_evidence=?,"
         " direction=COALESCE(?,direction),"
         " structure=COALESCE(?,structure), floors=COALESCE(?,floors),"
-        " scraped_at=datetime('now','localtime') WHERE detail_url=?",
-        (d["rent_yen"], d["admin_yen"],
-         (d["rent_yen"] or 0) + (d["admin_yen"] or 0) if d["rent_yen"] else None,
-         d["deposit_yen"], d["key_money_yen"], d["equipment"], hb,
-         (kw + " | " + d["equipment"])[:400], d["direction"],
-         d["structure"], d["floors"], canonical_url(url)))
+        " scraped_at=datetime('now','localtime') WHERE id=?",
+        (d["rent_yen"], d["admin_yen"], str(d["shikikin_yen"]),
+         str(d["reikin_yen"]), d["equipment"], status,
+         d.get("no_bathtub_evidence", "")[:500],
+         d.get("direction"), d.get("structure"), d.get("floors"), lid))
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
                 (status, conf, d["direction"], uid))

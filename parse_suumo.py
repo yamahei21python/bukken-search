@@ -288,4 +288,5 @@ def parse_detail(soup):
         "stations": parse_stations(acc.get("駅徒歩", "")),
         "equipment": equipment,
         "note": other,
+        "full": full,
     }
