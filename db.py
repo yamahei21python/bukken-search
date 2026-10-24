@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS properties(
   layout TEXT, area_m2 REAL, direction TEXT, structure TEXT, floors INTEGER,
   detail_url TEXT UNIQUE, equipment TEXT, has_bathtub INTEGER,
   no_bathtub_evidence TEXT,
-  scraped_at TEXT DEFAULT (datetime('now','localtime')));
+  scraped_at TEXT DEFAULT (datetime('now')));
 """
 
 _PROPERTY_COLUMNS = [
