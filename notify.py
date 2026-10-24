@@ -35,6 +35,12 @@ def check(top_score=60):
                WHERE s.rent_yen>l.rent_yen AND l.active=1
                GROUP BY l.id HAVING MAX(s.fetched_at) LIMIT 20"""):
         msg = f"値下げ {old}->{new}円 {url}"
+        # 同じ値下げを毎回再送しない（new/tub と同じ重複防止）。
+        # さらに値下がれば message が変わるので改めて通知される。
+        if con.execute("SELECT 1 FROM notifications WHERE listing_id=?"
+                       " AND kind='drop' AND message=?",
+                       (lid, msg)).fetchone():
+            continue
         con.execute("INSERT INTO notifications(listing_id,kind,message) VALUES(?, 'drop', ?)", (lid, msg))
         out.append(msg)
     # 湯船確定
