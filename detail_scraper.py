@@ -93,7 +93,7 @@ def apply_detail(con, lid, uid, url, d):
 
     con.execute("UPDATE listings SET rent_yen=COALESCE(?,rent_yen),"
                 " admin_yen=COALESCE(?,admin_yen), shikikin=?, reikin=?,"
-                " last_seen=datetime('now','localtime') WHERE id=?",
+                " last_seen=datetime('now') WHERE id=?",
                 (d["rent_yen"], d["admin_yen"], str(d["deposit_yen"]),
                  str(d["key_money_yen"]), lid))
     # 注意: 7054c2e でこの UPDATE が壊れていた（存在しないキー
@@ -109,7 +109,7 @@ def apply_detail(con, lid, uid, url, d):
         " equipment=?, has_bathtub=?, no_bathtub_evidence=?,"
         " direction=COALESCE(?,direction),"
         " structure=COALESCE(?,structure), floors=COALESCE(?,floors),"
-        " scraped_at=datetime('now','localtime') WHERE detail_url=?",
+        " scraped_at=datetime('now') WHERE detail_url=?",
         (d["rent_yen"], d["admin_yen"],
          (d["rent_yen"] or 0) + (d["admin_yen"] or 0) if d["rent_yen"] else None,
          d["deposit_yen"], d["key_money_yen"], d["equipment"], hb,
@@ -158,7 +158,7 @@ def apply_detail(con, lid, uid, url, d):
     if "角部屋" in equip:
         con.execute("UPDATE units SET corner=1 WHERE id=?", (uid,))
     con.execute("DELETE FROM listing_snapshots WHERE listing_id=?"
-                " AND date(fetched_at)=date('now','localtime')", (lid,))
+                " AND date(fetched_at)=date('now')", (lid,))
     con.execute("INSERT INTO listing_snapshots(listing_id,rent_yen,admin_yen,"
                 "active,equip_text) VALUES(?,?,?,1,?)",
                 (lid, d["rent_yen"], d["admin_yen"], d["equipment"][:2000]))
