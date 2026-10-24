@@ -249,17 +249,29 @@ def _yen_or_ratio(text, rent):
 
 
 def _agency_yen(g, other, full, price_raw, rent):
-    """仲介手数料。概要表の独立セル / 価格欄の行 / ほか初期費用 /
-    全文のラベル近傍、の順に探す。従来は未取得で costs.agency_yen が
-    常に NULL になり、実質総額が過小評価されていた。"""
-    for src in (price_raw, g.get("仲介手数料"), other):
+    """仲介手数料。ラベル付きの値だけを採用する。
+
+    従来は「ほか初期費用」全文の先頭金額へフォールバックしており、
+    注記が「合計14.3万円（内訳：…）」形式だと合計額そのものを
+    仲介手数料と誤認した（新DBで約999件、2年総額の二重計上の原因）。
+    ラベル近傍に無い金額は採用しない。あわせて、仲介手数料は
+    法律上 賃料の1.1ヶ月分が上限なので、超過分は誤読として捨てる。
+    """
+    v = None
+    for src in (price_raw, g.get("仲介手数料")):
         v = _yen_or_ratio(src, rent)
         if v is not None:
-            return v
-    idx = (full or "").find("仲介手数料")
-    if idx >= 0:
-        return _yen_or_ratio(full[idx: idx + 40], rent)
-    return None
+            break
+    if v is None and other and "仲介手数料" in other:
+        idx = other.find("仲介手数料")
+        v = _yen_or_ratio(other[idx: idx + 40], rent)
+    if v is None:
+        idx = (full or "").find("仲介手数料")
+        if idx >= 0:
+            v = _yen_or_ratio(full[idx: idx + 40], rent)
+    if v is not None and rent and v > rent * 1.1 + 1000:
+        return None
+    return v
 
 
 AMENITY_HINT = (
@@ -348,6 +360,39 @@ def parse_detail(soup):
     admin = price["admin"]
     if rent and admin and admin > rent:
         admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
+    # 敷金・礼金等の異常値ガード: 仲介側が円額を万円欄に入力した
+    # ケース（実例「敷金: 435600万円」=43.5億円、家賃6.6万円）を通さない。
+    # 住宅の敷金・礼金・保証金は通常0〜数ヶ月分で、12ヶ月分超は誤記。
+    if rent:
+        for key in ("deposit", "key_money", "hoshoukin", "shoukyaku"):
+            if price[key] is not None and price[key] > rent * 12:
+                price[key] = None
+
+    key_exchange_yen = _find_yen(other, r"鍵交換")
+    cleaning_yen = _find_yen(other,
+                              r"(ハウスクリーニング|室内清掃|清掃|クリーニング)")
+    support_yen = _find_yen(other, r"(サポート|CLUB|プレサポ|除菌消臭|安心)")
+    # 「合計X万円（内訳：…）」形式では各項目は合計以下のはず。
+    # 商品名末尾の数字と金額が連結した誤読（実例「アクト安心ライフ24
+    # 1.65万円」が分離されず 241.65万円 になる）では項目が合計を
+    # 超えるため、合計を超えた項目は捨てる。サポート費は合計が
+    # 取れない場合でも10万円超を実勢外として捨てる。
+    total_m = re.match(r"合計\s*([\d,]+(?:\.\d+)?\s*万円|[\d,]+\s*円)",
+                       nfkc(other or ""))
+    other_total = to_yen(total_m.group(1)) if total_m else None
+
+    def _cap_fee(v, cap=None):
+        if v is None:
+            return None
+        if other_total is not None and v > other_total:
+            return None
+        if cap is not None and v > cap:
+            return None
+        return v
+
+    key_exchange_yen = _cap_fee(key_exchange_yen)
+    cleaning_yen = _cap_fee(cleaning_yen)
+    support_yen = _cap_fee(support_yen, cap=100000)
 
     return {
         "rent_yen": rent,
@@ -357,9 +402,9 @@ def parse_detail(soup):
         "hoshoukin_yen": price["hoshoukin"],
         "shoukyaku_yen": price["shoukyaku"],
         "insurance_yen": to_yen(g.get("損保")),
-        "key_exchange_yen": _find_yen(other, r"鍵交換"),
-        "cleaning_yen": _find_yen(other, r"(ハウスクリーニング|室内清掃|清掃|クリーニング)"),
-        "support_yen": _find_yen(other, r"(サポート|CLUB|プレサポ|除菌消臭|安心)"),
+        "key_exchange_yen": key_exchange_yen,
+        "cleaning_yen": cleaning_yen,
+        "support_yen": support_yen,
         "guarantee_first_yen": (int(rent * guarantee_rate / 100)
                                 if rent and guarantee_rate else None),
         "guarantee_renew_yen": guarantee_renew_yen,
