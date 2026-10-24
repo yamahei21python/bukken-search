@@ -210,6 +210,21 @@ def _find_yen(text, label_re, window=25):
     return None
 
 
+def _labeled_yen(text, label_re, rent, window=40):
+    """ラベル近傍の金額を返す。絶対額に加え「賃料の1ヶ月分」「55%」
+    のような比率表記も rent から換算する (_yen_or_ratio を使用)。
+
+    更新料などは比率表記が主流で、絶対額だけ探す _find_yen では
+    ほぼ全件取りこぼしていた（新DBで更新料 0/2,248件）。
+    """
+    t = nfkc(text or "")
+    for m in re.finditer(label_re, t):
+        v = _yen_or_ratio(t[m.end(): m.end() + window], rent)
+        if v is not None:
+            return v
+    return None
+
+
 def _guarantee_rate(text):
     t = nfkc(text or "")
     for pat in (r"初回[^0-9]{0,10}(\d{1,3})\s*[%％]",
@@ -303,7 +318,14 @@ def _equipment_text(soup):
     for h in soup.find_all(["h2", "h3"]):
         t = h.get_text(strip=True)
         if "部屋の特徴" in t or "設備" in t:
-            return nfkc(h.parent.get_text(" ", strip=True)).split(t, 1)[-1].strip()
+            txt = nfkc(h.parent.get_text(" ", strip=True)) \
+                .split(t, 1)[-1].strip()
+            # 親要素の全文が返るページ型があり、PR文や物件概要の塊
+            # （数百字）が設備として混入した。設備らしい語を複数
+            # 含む場合だけ、長さに上限を付けて採用する。
+            if sum(1 for k in AMENITY_HINT if k in txt) >= 2:
+                return txt[:500]
+            return ""
     return ""
 
 
@@ -350,13 +372,28 @@ def parse_detail(soup):
     guarantee_rate = _guarantee_rate(g.get("保証会社"))
     rent = price["rent"]
     contract = g.get("契約期間") or ""
-    cm = re.search(r"(\d+)年", contract)
-    months = int(cm.group(1)) * 12 if cm else None
+    # 契約期間のパース: 「2028年3月末まで」のような定期借家の期限
+    # （西暦）を期間と誤認しないよう、大きな年数は除外する
+    # （誤認すると contract_months が 24336 のような値になった）。
+    months = None
+    for m in re.finditer(r"(\d+)\s*年", contract):
+        yrs = int(m.group(1))
+        if yrs <= 30:
+            months = yrs * 12
+            # 「2年6ヶ月」形式のときだけ月を足す（直後のみを見る。
+            # セル内の更新料「1ヶ月分」等を拾わないため）
+            mm = re.match(r"\s*(\d+)\s*(?:ヶ月|か月|カ月)",
+                          contract[m.end():])
+            if mm:
+                months += int(mm.group(1))
+            break
     # 保証会社の更新料と契約の更新料は別物。従来は両列に同じ値を
-    # 入れていたため実質月額で二重計上されていた。
-    guarantee_renew_yen = _find_yen(g.get("保証会社") or "", r"更新料")
-    renewal_fee_yen = _find_yen(contract, r"更新料") \
-        or _find_yen(other, r"更新手数料")
+    # 入れていたため実質月額で二重計上されていた。どちらも
+    # 「賃料の1ヶ月分」等の比率表記が多いため _labeled_yen で拾う。
+    guarantee_renew_yen = _labeled_yen(g.get("保証会社") or "",
+                                       r"更新料", rent)
+    renewal_fee_yen = _labeled_yen(contract, r"更新料", rent) \
+        or _labeled_yen(other, r"更新手数料", rent)
     admin = price["admin"]
     if rent and admin and admin > rent:
         admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
