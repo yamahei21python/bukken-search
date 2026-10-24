@@ -122,7 +122,9 @@ def scope(df, a):
         m &= df.listing_active.fillna(0).astype(int) == 1
     if a.max_age_days and "last_seen" in df.columns:
         seen = pd.to_datetime(df.last_seen, errors="coerce")
-        cutoff = pd.Timestamp.now() - pd.Timedelta(days=a.max_age_days)
+        # DBの時刻は UTC 統一。手元のローカル時刻と比べると9時間ずれる
+        cutoff = pd.Timestamp.now(tz="UTC").tz_localize(None) \
+            - pd.Timedelta(days=a.max_age_days)
         m &= seen.isna() | (seen >= cutoff)
     if a.layout:
         m &= df.layout.isin(a.layout)
