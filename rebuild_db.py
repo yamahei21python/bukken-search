@@ -81,7 +81,7 @@ def main():
     con = sqlite3.connect(a.db)
     cur = con.execute(
         "UPDATE listings SET active=0 WHERE active=1"
-        " AND last_seen < datetime('now','localtime',?)",
+        " AND last_seen < datetime('now',?)",
         (f"-{a.stale_days} days",))
     print(f"deactivated stale: {cur.rowcount}")
     con.commit()
