@@ -520,6 +520,9 @@ def parse_detail(soup):
     renewal_fee_yen = _labeled_yen(contract, r"更新料", rent) \
         or _labeled_yen(other, r"更新手数料", rent) \
         or _labeled_yen(other, r"(?<!保証)(?<!保証会社)更新料", rent)
+    # ガード: 倍率が巨大な誤読（新賃料86000.00ヶ月分等）を棄却
+    if renewal_fee_yen is not None and rent and renewal_fee_yen > rent * 3:
+        renewal_fee_yen = None
     admin = price["admin"]
     if rent and admin and admin > rent:
         admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
