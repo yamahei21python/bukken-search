@@ -24,6 +24,12 @@ _PROPERTY_COLUMNS = [
     ("structure", "TEXT"), ("floors", "INTEGER"),
 ]
 
+# 既存DB向けの軽いマイグレーション（CREATE TABLE IF NOT EXISTS では
+# 既存テーブルに列が増えないため、初期化時に不足列だけ足す）
+_COSTS_COLUMNS = [
+    ("support_monthly_yen", "INTEGER"),
+]
+
 
 def connect_db() -> sqlite3.Connection:
     """共通DB接続。呼び出し側がcommit/closeを管理。"""
@@ -58,6 +64,10 @@ def initialize_db(rebuild: bool = False) -> None:
         for name, kind in _PROPERTY_COLUMNS:
             if name not in columns:
                 con.execute(f"ALTER TABLE properties ADD COLUMN {name} {kind}")
+        cost_columns = {row[1] for row in con.execute("PRAGMA table_info(costs)")}
+        for name, kind in _COSTS_COLUMNS:
+            if name not in cost_columns:
+                con.execute(f"ALTER TABLE costs ADD COLUMN {name} {kind}")
         con.commit()
     finally:
         con.close()

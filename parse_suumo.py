@@ -54,7 +54,10 @@ def to_yen(tok):
         return int(round(float(m.group(1).replace(",", "")) * 10000))
     m = re.search(_NUM + r"\s*円", t)
     if m:
-        return int(m.group(1).replace(",", ""))
+        # 円分岐も小数（"2095.5円"）がありうる。int() 直変換だと
+        # ValueError で落ち、詳細側は毒物件化・一覧側は run 全体が
+        # 異常終了するため、万円分岐と同じく丸めて受ける。
+        return int(round(float(m.group(1).replace(",", ""))))
     if any(k in t for k in ("なし", "不要", "無料", "込")):
         return 0
     return None
@@ -115,15 +118,27 @@ def normalize_address(address: str | None) -> str:
 
 
 def parse_stations(text):
-    """'地下鉄中央線/阿波座駅 歩5分 ...' を全件 [{line,name,walk}] へ。"""
+    """'地下鉄中央線/阿波座駅 歩5分 ...' を [{line,name,walk}] へ。
+
+    駅名で dedup し最大3件に切り詰める。SUUMO が物件に付ける駅は
+    最大3件で、それを超える分は店舗情報など別ブロック由来の混入
+    （実例: 旭区中宮の物件に仲介店舗の最寄り「四ツ橋駅 歩1分」が
+    付いた）。同一駅が複数路線で並ぶ場合は先勝ちで1件にする。
+    """
     results = _STATION_RE.findall(nfkc(text))
     out = []
+    seen = set()
     for line, name, *walk_vals in results:
+        if name in seen:
+            continue
+        seen.add(name)
         # walk_vals has 6 entries; use first truthy
         walk = next((w for w in walk_vals if w), None)
         if walk is not None:
             walk = int(walk)
         out.append({"line": line, "name": name, "walk": walk})
+        if len(out) >= 3:
+            break
     return out
 
 
@@ -151,42 +166,55 @@ def parse_list(soup, focus_station=""):
             or (0 if "新築" in det else None)
         floors = _int(re.search(r"(\d+)階建", det))
 
+        base = {"name": name, "address": address, "age_years": age,
+                "floors": floors, "stations": stations, "nearest": nearest}
         for row in cas.select(".cassetteitem_other tbody tr.js-cassette_link"):
-            cells = [td.get_text(" ", strip=True) for td in row.select("td")]
-
-            def cell(i):
-                return cells[i] if i < len(cells) else ""
-
-            rent, admin = money_pair(cell(3))
-            if rent and admin and admin > rent:
-                # 管理費が家賃を超えるのはセル誤読（実DBで8件確認）。
-                # 総額が約2倍になり rank/app から消えるため欠落扱いにする。
-                admin = None
-            shiki, rei = money_pair(cell(4))
-            layout = ""
-            ml = _LAYOUT_RE.search(cell(5))
-            if ml:
-                layout = ml.group(1)
-            ma = re.search(r"([\d.]+)\s*m", cell(5))
-            area = float(ma.group(1)) if ma else None
-
-            durl = None
-            for a in row.select("a[href]"):
-                h = a.get("href", "")
-                if "jnc_" in h:
-                    durl = h if h.startswith("http") else "https://suumo.jp" + h
-                    break
-
-            out.append({
-                "name": name, "address": address, "age_years": age,
-                "floors": floors, "floor": _int(re.search(r"(\d+)階", cell(2))),
-                "rent_yen": rent, "admin_yen": admin,
-                "shikikin_yen": shiki, "reikin_yen": rei,
-                "layout": layout, "area_m2": area,
-                "url": canonical_url(durl), "jnc": jnc_id(durl),
-                "stations": stations, "nearest": nearest,
-            })
+            try:
+                out.append(_list_row(row, base))
+            except Exception:
+                # 1行のパース失敗（金額の想定外表記など）で一覧
+                # run 全体を落とさない。当該行だけを捨てる。
+                continue
     return out
+
+
+def _list_row(row, base):
+    """一覧の1行（1部屋）を dict へ。base はカセット共通部。"""
+    cells = [td.get_text(" ", strip=True) for td in row.select("td")]
+
+    def cell(i):
+        return cells[i] if i < len(cells) else ""
+
+    rent, admin = money_pair(cell(3))
+    if rent and admin and admin > rent:
+        # 管理費が家賃を超えるのはセル誤読（実DBで8件確認）。
+        # 総額が約2倍になり rank/app から消えるため欠落扱いにする。
+        admin = None
+    shiki, rei = money_pair(cell(4))
+    layout = ""
+    ml = _LAYOUT_RE.search(cell(5))
+    if ml:
+        layout = ml.group(1)
+    ma = re.search(r"([\d.]+)\s*m", cell(5))
+    area = float(ma.group(1)) if ma else None
+
+    durl = None
+    for a in row.select("a[href]"):
+        h = a.get("href", "")
+        if "jnc_" in h:
+            durl = h if h.startswith("http") else "https://suumo.jp" + h
+            break
+
+    return {
+        "name": base["name"], "address": base["address"],
+        "age_years": base["age_years"], "floors": base["floors"],
+        "floor": _int(re.search(r"(\d+)階", cell(2))),
+        "rent_yen": rent, "admin_yen": admin,
+        "shikikin_yen": shiki, "reikin_yen": rei,
+        "layout": layout, "area_m2": area,
+        "url": canonical_url(durl), "jnc": jnc_id(durl),
+        "stations": base["stations"], "nearest": base["nearest"],
+    }
 
 
 def _table_map(node):
@@ -210,16 +238,40 @@ def _find_yen(text, label_re, window=25):
     return None
 
 
+def _first_value(seg, rent):
+    """ラベル直後の断片から、最初に現れた金額/比率を採用する。
+
+    金額を優先して断片全体から探すと、「更新料1ヵ月 更新事務
+    手数料16500円」のような並記で別費目の金額を掴む（実例あり）。
+    ラベルに最も近い表記が当該費目の値とみなす。
+    """
+    if any(k in seg for k in ("なし", "不要", "無料")) \
+            and not re.search(r"[\d,]+\s*(?:万円|円)", seg):
+        return 0
+    best = None
+    am = re.search(r"[\d,]+(?:\.\d+)?\s*万円|[\d,]+(?:\.\d+)?\s*円", seg)
+    if am:
+        best = (am.start(), to_yen(am.group(0)))
+    if rent:
+        rm = re.search(r"([\d.]+)\s*(?:ヶ月|か月|カ月|ヵ月)(?:分)?", seg)
+        if rm and (best is None or rm.start() < best[0]):
+            best = (rm.start(), int(rent * float(rm.group(1))))
+        pm = re.search(r"([\d.]+)\s*[%％]", seg)
+        if pm and (best is None or pm.start() < best[0]):
+            best = (pm.start(), int(rent * float(pm.group(1)) / 100))
+    return best[1] if best else None
+
+
 def _labeled_yen(text, label_re, rent, window=40):
     """ラベル近傍の金額を返す。絶対額に加え「賃料の1ヶ月分」「55%」
-    のような比率表記も rent から換算する (_yen_or_ratio を使用)。
+    のような比率表記も rent から換算する。
 
     更新料などは比率表記が主流で、絶対額だけ探す _find_yen では
     ほぼ全件取りこぼしていた（新DBで更新料 0/2,248件）。
     """
     t = nfkc(text or "")
     for m in re.finditer(label_re, t):
-        v = _yen_or_ratio(t[m.end(): m.end() + window], rent)
+        v = _first_value(t[m.end(): m.end() + window], rent)
         if v is not None:
             return v
     return None
@@ -249,12 +301,12 @@ def _yen_or_ratio(text, rent):
     m = re.search(r"([\d,]+(?:\.\d+)?)\s*万円", t)
     if m:
         return int(round(float(m.group(1).replace(",", "")) * 10000))
-    m = re.search(r"([\d,]+)\s*円", t)
+    m = re.search(r"([\d,]+(?:\.\d+)?)\s*円", t)
     if m:
-        return int(m.group(1).replace(",", ""))
+        return int(round(float(m.group(1).replace(",", ""))))
     if not rent:
         return None
-    m = re.search(r"([\d.]+)\s*(?:ヶ月|か月|カ月)(?:分)?", t)
+    m = re.search(r"([\d.]+)\s*(?:ヶ月|か月|カ月|ヵ月)(?:分)?", t)
     if m:
         return int(rent * float(m.group(1)))
     m = re.search(r"([\d.]+)\s*[%％]", t)
@@ -329,10 +381,78 @@ def _equipment_text(soup):
     return ""
 
 
+def _cleaning_yen(text):
+    """室内清掃費。「エアコンクリーニング/エアコン清掃」は空調の
+    清掃費で別費目なので採用しない（従来はラベルの先勝ちで
+    エアコン清掃費が cleaning_yen に混入していた）。"""
+    t = nfkc(text or "")
+    for m in re.finditer(r"(ハウスクリーニング|室内清掃|清掃|クリーニング)",
+                         t):
+        if "エアコン" in t[max(0, m.start() - 6):m.start()]:
+            continue
+        am = re.search(r"([\d,]+(?:\.\d+)?\s*万円|[\d,]+\s*円)",
+                       t[m.end():m.end() + 25])
+        if am:
+            return to_yen(am.group(1))
+    return None
+
+
+def _support_fees(text):
+    """サポート系費用を (一時金, 月額) に分けて返す。
+
+    ほか初期費用には「安心サポート 月額880円」のような月額型と
+    「ライフサポート4.62万円」のような入居時一時金型が混在する。
+    従来は同一列に入れており、実質月額（全額を毎月加算）と
+    2年総額（完全に無視）の両方が誤っていた。
+    """
+    t = nfkc(text or "")
+    one_time = None
+    monthly = None
+    for m in re.finditer(r"(サポート|CLUB|プレサポ|除菌消臭|安心)", t):
+        seg = t[m.start():m.start() + 48]
+        am = re.search(r"([\d,]+(?:\.\d+)?\s*万円|[\d,]+\s*円)", seg)
+        if not am:
+            continue
+        v = to_yen(am.group(1))
+        if v is None:
+            continue
+        # 「月額880円」「990円/月額」など金額の前後に「月額」が
+        # 付くものは月額型、付かないものは一時金として分類する
+        if "月額" in t[m.start():m.start() + am.end() + 6]:
+            if monthly is None:
+                monthly = v
+        elif one_time is None:
+            one_time = v
+        if one_time is not None and monthly is not None:
+            break
+    return one_time, monthly
+
+
+def _free_rent_months(*texts):
+    """フリーレント月数。物件側の文脈だけを探す。
+
+    ページ全文で探すと仲介会社の PR 文（「フリーレント付き物件の
+    特集も充実」等）に誤反応する。価格メモ・設備・ほか初期費用・
+    契約期間に限定し、月数が読めればその値、言及のみなら 1。
+    従来は 0/1 の二値で「2ヶ月」でも 1 になっていた。
+    """
+    for t in texts:
+        m = re.search(
+            r"フリーレント\s*(\d+(?:\.\d+)?)\s*(?:ヶ月|か月|カ月|ヵ月|月)",
+            nfkc(t or ""))
+        if m:
+            return float(m.group(1))
+    for t in texts:
+        if "フリーレント" in nfkc(t or ""):
+            return 1.0
+    return 0.0
+
+
 def parse_detail(soup):
     """詳細ページ -> dict（欠落はNone）。"""
     info = soup.select_one(".property_view_note-info") \
         or soup.select_one(".property_view_note")
+    price_note = nfkc(info.get_text(" ")) if info else ""
     price = {"rent": None, "admin": None, "deposit": None, "key_money": None,
              "hoshoukin": None, "shoukyaku": None, "agency_raw": None}
     if info:
@@ -382,7 +502,7 @@ def parse_detail(soup):
             months = yrs * 12
             # 「2年6ヶ月」形式のときだけ月を足す（直後のみを見る。
             # セル内の更新料「1ヶ月分」等を拾わないため）
-            mm = re.match(r"\s*(\d+)\s*(?:ヶ月|か月|カ月)",
+            mm = re.match(r"\s*(\d+)\s*(?:ヶ月|か月|カ月|ヵ月)",
                           contract[m.end():])
             if mm:
                 months += int(mm.group(1))
@@ -392,8 +512,14 @@ def parse_detail(soup):
     # 「賃料の1ヶ月分」等の比率表記が多いため _labeled_yen で拾う。
     guarantee_renew_yen = _labeled_yen(g.get("保証会社") or "",
                                        r"更新料", rent)
+    # ほか初期費用側は「更新手数料」表記しか見ておらず、主流の
+    # 「更新料 15000円」「更新料 新賃料1.00ヶ月分」を取りこぼして
+    # いた（備考に更新料があるのに NULL が81件、取得成功は1件）。
+    # 保証会社の更新料（保証更新料/保証会社更新料）は別費目なので
+    # 否定後読みで除外する。
     renewal_fee_yen = _labeled_yen(contract, r"更新料", rent) \
-        or _labeled_yen(other, r"更新手数料", rent)
+        or _labeled_yen(other, r"更新手数料", rent) \
+        or _labeled_yen(other, r"(?<!保証)(?<!保証会社)更新料", rent)
     admin = price["admin"]
     if rent and admin and admin > rent:
         admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
@@ -406,9 +532,8 @@ def parse_detail(soup):
                 price[key] = None
 
     key_exchange_yen = _find_yen(other, r"鍵交換")
-    cleaning_yen = _find_yen(other,
-                              r"(ハウスクリーニング|室内清掃|清掃|クリーニング)")
-    support_yen = _find_yen(other, r"(サポート|CLUB|プレサポ|除菌消臭|安心)")
+    cleaning_yen = _cleaning_yen(other)
+    support_yen, support_monthly_yen = _support_fees(other)
     # 「合計X万円（内訳：…）」形式では各項目は合計以下のはず。
     # 商品名末尾の数字と金額が連結した誤読（実例「アクト安心ライフ24
     # 1.65万円」が分離されず 241.65万円 になる）では項目が合計を
@@ -418,10 +543,10 @@ def parse_detail(soup):
                        nfkc(other or ""))
     other_total = to_yen(total_m.group(1)) if total_m else None
 
-    def _cap_fee(v, cap=None):
+    def _cap_fee(v, cap=None, check_total=True):
         if v is None:
             return None
-        if other_total is not None and v > other_total:
+        if check_total and other_total is not None and v > other_total:
             return None
         if cap is not None and v > cap:
             return None
@@ -430,6 +555,17 @@ def parse_detail(soup):
     key_exchange_yen = _cap_fee(key_exchange_yen)
     cleaning_yen = _cap_fee(cleaning_yen)
     support_yen = _cap_fee(support_yen, cap=100000)
+    # 月額型は初期費用の「合計」の内訳ではないため合計ガードは
+    # 掛けず、上限だけを適用する
+    support_monthly_yen = _cap_fee(support_monthly_yen, cap=100000,
+                                   check_total=False)
+
+    direction = acc.get("向き")
+    if direction is not None and nfkc(direction).strip() in _DASH:
+        # SUUMO の「-」は向き未公表のプレースホルダ。値として保存
+        # すると実値の上書きや誤集計の元になるため NULL に倒す
+        direction = None
+    area_m = re.search(r"([\d.]+)", acc.get("専有面積") or "")
 
     return {
         "rent_yen": rent,
@@ -442,6 +578,7 @@ def parse_detail(soup):
         "key_exchange_yen": key_exchange_yen,
         "cleaning_yen": cleaning_yen,
         "support_yen": support_yen,
+        "support_monthly_yen": support_monthly_yen,
         "guarantee_first_yen": (int(rent * guarantee_rate / 100)
                                 if rent and guarantee_rate else None),
         "guarantee_renew_yen": guarantee_renew_yen,
@@ -450,13 +587,15 @@ def parse_detail(soup):
         "water_fixed_yen": _find_yen(full, r"水道代"),
         "contract_months": months,
         "regular_lease": 0 if "定期借家" in full else 1,
-        "free_rent_months": 1 if "フリーレント" in full else 0,
+        "free_rent_months": _free_rent_months(price_note, equipment,
+                                              other, contract),
         "structure": g.get("構造"),
         "floors": _int(re.search(r"(\d+)階建",
                                  g.get("階建") or "")),
         "building_age_years": _int(re.search(r"築(\d+)年",
                                              acc.get("築年数") or "")),
-        "direction": acc.get("向き"),
+        "direction": direction,
+        "area_m2": float(area_m.group(1)) if area_m else None,
         "building_type": acc.get("建物種別"),
         "address": acc.get("所在地"),
         "stations": parse_stations(acc.get("駅徒歩", "")),

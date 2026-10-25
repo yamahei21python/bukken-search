@@ -51,6 +51,7 @@ SELECT p.id, p.name, p.station, p.address, p.walk_min, p.age_years,
        c.fetched, c.key_money_yen, c.deposit_yen, c.agency_yen,
        c.guarantee_first_yen, c.guarantee_renew_yen, c.insurance_yen,
        c.key_exchange_yen, c.cleaning_yen, c.support_yen,
+       c.support_monthly_yen,
        c.water_fixed_yen, c.renewal_fee_yen, c.contract_months,
        c.free_rent_months, u.building_id,
        u.direction AS u_direction, u.corner AS u_corner,
@@ -339,19 +340,26 @@ def nonrefund_total(r):
 
 
 def effective_monthly(r):
-    """実質月額: 管理費+水道+サポート+更新/契約月+保証更新/12+初期非返還/24。"""
+    """実質月額: 管理費+水道+サポート月額+更新/契約月+保証更新/12+初期非返還/24。
+
+    サポート一時金は月額に混ぜない（models.effective_monthly と同じ定義）。
+    """
     months = value_or_zero(r.contract_months) or 24
     return (r.total_yen + value_or_zero(r.water_fixed_yen)
-            + value_or_zero(r.support_yen)
+            + value_or_zero(r.support_monthly_yen)
             + value_or_zero(r.guarantee_renew_yen) / 12
             + value_or_zero(r.renewal_fee_yen) / months
             + nonrefund_total(r) / 24)
 
 
 def total_2year(r):
+    months = value_or_zero(r.contract_months) or 24
     return (r.total_yen * 24 + nonrefund_total(r) + value_or_zero(r.deposit_yen)
             + value_or_zero(r.renewal_fee_yen)
             + value_or_zero(r.guarantee_renew_yen) * 2
+            # サポート費は 一時金 + 月額×契約月数（models と同じ定義）
+            + value_or_zero(r.support_yen)
+            + value_or_zero(r.support_monthly_yen) * months
             # フリーレント控除は models.total_2year と同じく家賃分のみ
             - r.rent_yen * value_or_zero(r.free_rent_months))
 

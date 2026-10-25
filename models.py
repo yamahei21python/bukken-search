@@ -6,16 +6,31 @@ CFG = yaml.safe_load(open(Path(__file__).parent / "config.yaml"))
 
 def effective_monthly(rent, admin=0, water=0, support=0,
                       guarantee_renew=0, renewal_fee=0,
-                      contract_months=24, nonrefund_init=0):
-    return ((rent or 0) + (admin or 0) + (water or 0) + (support or 0)
+                      contract_months=24, nonrefund_init=0,
+                      support_monthly=0):
+    """実質月額。
+
+    support（一時金）は月額に混ぜない。月額型サポートは
+    support_monthly のみを加算する（従来は一時金 46,200円が
+    毎月 +46,200円に化けていた）。contract_months が不明
+    （NULL）のときは 24ヶ月とみなして更新料を按分する。
+    """
+    return ((rent or 0) + (admin or 0) + (water or 0)
+            + (support_monthly or 0)
             + (guarantee_renew or 0) / 12
             + (renewal_fee or 0) / (contract_months or 24)
             + (nonrefund_init or 0) / 24)
 
 def total_2year(rent, admin=0, init_total=0, renewal_fee=0,
-                guarantee_renew=0, free_months=0):
+                guarantee_renew=0, free_months=0,
+                support_once=0, support_monthly=0, contract_months=None):
+    """2年総額。サポート費は 一時金 + 月額×契約月数 で計上する
+    （従来は完全に無視され、月額990円の物件で 23,760円脱落した）。
+    contract_months 不明時は 24ヶ月で計算する。"""
+    months = contract_months or 24
     return ((rent or 0) + (admin or 0)) * 24 + (init_total or 0) \
         + (renewal_fee or 0) + (guarantee_renew or 0) * 2 \
+        + (support_once or 0) + (support_monthly or 0) * months \
         - (rent or 0) * (free_months or 0)
 
 EXC = CFG["tub"]["exclude_keywords"]
@@ -49,21 +64,48 @@ def _get_text_sources(d):
 
 
 def _judge_text(t):
-    """1つのテキスト源だけを判定。キーワード無しは None。"""
+    """1つのテキスト源だけを判定。キーワード無しは None。
+
+    浴槽の実在証拠（ユニットバス/追焚/バストイレ別/浴室乾燥 等）が
+    あれば湯船側を優先する。「シャワールーム」「シャワーブース」は
+    浴槽と共存しうる弱い信号でしかなく（設備タグに両方が並ぶ物件が
+    多数ある）、それ単独でも共存時でも湯船なし側には倒さない。
+    実ページ検証では likely_no_tub が 5件中5件誤りだった。
+    湯船なし側は「シャワーのみ」「浴槽なし」等の明示表現
+    （confirmed_no）がある場合だけ採用する。
+    """
     t = _strip_excluded(t or "")
-    for kw in CFG["tub"]["confirmed_no"]:
-        if kw in t:
-            return "confirmed_no_tub", kw, 0.95
     for kw in CFG["tub"]["confirmed_yes"]:
         if kw in t:
             return "confirmed_tub", kw, 0.95
-    for kw in CFG["tub"]["likely_no"]:
-        if kw in t:
-            return "likely_no_tub", kw, 0.6
     for kw in CFG["tub"]["likely_yes"]:
         if kw in t:
             return "likely_tub", kw, 0.6
+    for kw in CFG["tub"]["confirmed_no"]:
+        if kw in t:
+            return "confirmed_no_tub", kw, 0.95
     return None
+
+
+_TUB_PRIORITY = ("confirmed_tub", "likely_tub",
+                 "confirmed_no_tub", "likely_no_tub")
+
+
+def aggregate_tub_status(verdicts):
+    """unit 内の複数 listing の判定を1つに集約する。
+
+    同じ部屋が複数仲介で掲載されると listing ごとに判定が割れる
+    （設備文の版差異）。last-writer-wins だと最後に取得した1件の
+    誤判定が unit 全体に広がるため、強い浴槽証拠が1件でもあれば
+    unit は湯船側とし、湯船なしは全 listing が湯船なし側の
+    ときだけ採用する。
+    verdicts: [(status, confidence), ...] -> (status, confidence)
+    """
+    for want in _TUB_PRIORITY:
+        confs = [c for s, c in verdicts if s == want]
+        if confs:
+            return want, max(confs)
+    return "unknown", 0.0
 
 
 def judge_tub(d):

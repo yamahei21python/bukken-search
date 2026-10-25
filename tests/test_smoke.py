@@ -21,6 +21,11 @@ class TestMoney(unittest.TestCase):
         self.assertEqual(to_yen("2.675万円"), 26750)
         self.assertIsNone(to_yen("-"))
 
+    def test_to_yen_decimal_yen_no_crash(self):
+        # 小数円額（"2095.5円"）で ValueError を投げない
+        self.assertEqual(to_yen("2095.5円"), 2096)
+        self.assertEqual(to_yen("2095円"), 2095)
+
     def test_money_pair_range(self):
         # 範囲表記の第二値を管理費と誤認しない
         self.assertEqual(money_pair("8.5万円～9万円"), (85000, None))
@@ -38,9 +43,22 @@ class TestJudgeTub(unittest.TestCase):
         d = {"equipment": "", "note": "", "full": "お風呂はシャワーのみ"}
         self.assertEqual(judge_tub(d)[0], "confirmed_no_tub")
 
-    def test_likely(self):
+    def test_shower_room_alone_is_not_no_tub(self):
+        # シャワールームは浴槽と共存しうる弱い信号。単独では
+        # 湯船なし側に倒さない（旧仕様は likely_no_tub にしていた）
         d = {"equipment": "シャワールーム", "note": "", "full": ""}
-        self.assertEqual(judge_tub(d)[0], "likely_no_tub")
+        self.assertEqual(judge_tub(d)[0], "unknown")
+
+    def test_shower_room_with_separate_bath_is_tub(self):
+        # バストイレ別・浴室乾燥（浴槽の実在証拠）が共存すれば湯船側。
+        # 実ページ検証で旧判定が 5件中5件誤っていたパターン
+        d = {"equipment": "シャワールーム、バストイレ別、浴室乾燥機",
+             "note": "", "full": ""}
+        self.assertEqual(judge_tub(d)[0], "likely_tub")
+
+    def test_explicit_no_tub_phrase(self):
+        d = {"equipment": "シャワーのみ、エアコン", "note": "", "full": ""}
+        self.assertEqual(judge_tub(d)[0], "confirmed_no_tub")
 
 
 class TestParseDetail(unittest.TestCase):
@@ -123,6 +141,135 @@ class TestParseDetail(unittest.TestCase):
             self._with_contract("2年 更新料: 新賃料の1ヶ月分"), "lxml"))
         self.assertEqual(d["contract_months"], 24)
         self.assertEqual(d["renewal_fee_yen"], 70000)
+
+    def test_renewal_from_other_plain_label(self):
+        # ほか初期費用の「更新料」表記（「更新手数料」以外）も拾う
+        d = parse_detail(BeautifulSoup(
+            self._with_other("更新料 15000円"), "lxml"))
+        self.assertEqual(d["renewal_fee_yen"], 15000)
+
+    def test_renewal_from_other_ratio(self):
+        d = parse_detail(BeautifulSoup(
+            self._with_other("更新料 新賃料1.00ヶ月分"), "lxml"))
+        self.assertEqual(d["renewal_fee_yen"], 70500)
+
+    def test_renewal_not_guarantee_renew(self):
+        # 保証会社の更新料は契約更新料に混ぜない
+        d = parse_detail(BeautifulSoup(
+            self._with_other("保証会社更新料 1万円"), "lxml"))
+        self.assertIsNone(d["renewal_fee_yen"])
+
+    def test_support_monthly_split(self):
+        # 月額型サポートは support_monthly_yen へ（一時金と分離）
+        d = parse_detail(BeautifulSoup(
+            self._with_other("安心サポート 月額880円"), "lxml"))
+        self.assertIsNone(d["support_yen"])
+        self.assertEqual(d["support_monthly_yen"], 880)
+
+    def test_support_one_time(self):
+        d = parse_detail(BeautifulSoup(
+            self._with_other("ライフサポートプラス4.62万円"), "lxml"))
+        self.assertEqual(d["support_yen"], 46200)
+        self.assertIsNone(d["support_monthly_yen"])
+
+    def test_support_mixed(self):
+        d = parse_detail(BeautifulSoup(
+            self._with_other("安心サポート 月額880円 除菌消臭1.1万円"),
+            "lxml"))
+        self.assertEqual(d["support_monthly_yen"], 880)
+        self.assertEqual(d["support_yen"], 11000)
+
+    def test_cleaning_not_aircon(self):
+        # エアコンクリーニング代を室内清掃費と誤認しない（順序不問）
+        d = parse_detail(BeautifulSoup(
+            self._with_other("退去時エアコンクリーニング代1.1万円"
+                             " ハウスクリーニング代3.3万円"), "lxml"))
+        self.assertEqual(d["cleaning_yen"], 33000)
+        d = parse_detail(BeautifulSoup(
+            self._with_other("エアコンクリーニング代1.32万円"), "lxml"))
+        self.assertIsNone(d["cleaning_yen"])
+
+    def test_free_rent_agency_pr_ignored(self):
+        # 仲介会社の PR 文（ページ全文にのみ出現）では発火しない
+        html = ("<html><body><div>フリーレント付き物件の特集も充実"
+                "</div><div class='property_view_note-info'>\n"
+                "7万円\n管理費: 5000円\n</div></body></html>")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertEqual(d["free_rent_months"], 0)
+
+    def _with_equipment(self, items):
+        lis = "".join(f"<li>{x}</li>" for x in items)
+        return ("<html><body><div class='property_view_note-info'>\n"
+                "7万円\n管理費: 5000円\n</div>"
+                f"<ul class='inline_list'>{lis}</ul></body></html>")
+
+    def test_free_rent_months_kept(self):
+        # 「フリーレント2ヶ月」は 2 として保持する（0/1二値化しない）
+        d = parse_detail(BeautifulSoup(self._with_equipment(
+            ["エアコン", "オートロック", "フローリング",
+             "フリーレント2ヶ月"]), "lxml"))
+        self.assertEqual(d["free_rent_months"], 2.0)
+
+    def test_free_rent_tag_only_is_one(self):
+        d = parse_detail(BeautifulSoup(self._with_equipment(
+            ["エアコン", "オートロック", "フローリング",
+             "フリーレント"]), "lxml"))
+        self.assertEqual(d["free_rent_months"], 1.0)
+
+    def test_contract_absent_is_none(self):
+        # 契約期間が読めない場合は None（24で埋めない）
+        html = ("<html><body><div class='property_view_note-info'>\n"
+                "7万円\n管理費: 5000円\n</div></body></html>")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["contract_months"])
+
+    def _with_acc(self, rows_html):
+        return ("<html><body><div class='property_view_note-info'>\n"
+                "7万円\n管理費: 5000円\n</div>"
+                "<table class='property_view_table'>"
+                f"{rows_html}</table></body></html>")
+
+    def test_direction_placeholder_and_area(self):
+        # 向き「-」はプレースホルダとして NULL に倒し、専有面積は拾う
+        d = parse_detail(BeautifulSoup(self._with_acc(
+            "<tr><th>所在地</th><td>大阪市西区</td>"
+            "<th>駅徒歩</th><td>地下鉄中央線/阿波座駅 歩5分</td></tr>"
+            "<tr><th>間取り</th><td>1K</td>"
+            "<th>専有面積</th><td>23.2m2</td></tr>"
+            "<tr><th>向き</th><td>-</td><th>階</th><td>3階</td></tr>"),
+            "lxml"))
+        self.assertIsNone(d["direction"])
+        self.assertEqual(d["area_m2"], 23.2)
+        self.assertEqual([s["name"] for s in d["stations"]], ["阿波座"])
+
+    def test_direction_real_value(self):
+        d = parse_detail(BeautifulSoup(self._with_acc(
+            "<tr><th>向き</th><td>南</td><th>階</th><td>3階</td></tr>"),
+            "lxml"))
+        self.assertEqual(d["direction"], "南")
+
+
+class TestStations(unittest.TestCase):
+    def test_dedup_and_cap(self):
+        from parse_suumo import parse_stations
+        st = parse_stations(
+            "地下鉄中央線/阿波座駅 歩5分 地下鉄千日前線/阿波座駅 歩3分"
+            " 地下鉄長堀鶴見緑地線/西長堀駅 歩7分"
+            " 地下鉄四つ橋線/本町駅 歩9分 地下鉄御堂筋線/本町駅 歩8分")
+        self.assertEqual([s["name"] for s in st],
+                         ["阿波座", "西長堀", "本町"])
+
+    def test_fino_stations(self):
+        # 旭区中宮の物件: 物件情報ブロックの3駅だけが正解で、
+        # 仲介店舗の駅（四ツ橋・心斎橋・西大橋）を拾わない
+        fino = (Path(__file__).resolve().parents[2]
+                / "fino" / "detail.html")
+        if not fino.exists():
+            self.skipTest("fino corpus not available")
+        d = parse_detail(BeautifulSoup(fino.read_text(), "lxml"))
+        self.assertEqual(
+            [(s["name"], s["walk"]) for s in d["stations"]],
+            [("千林大宮", 11), ("城北公園通", 14), ("森小路", 18)])
 
 
 class TestScore(unittest.TestCase):
@@ -220,6 +367,168 @@ class TestSavePreservesDetail(unittest.TestCase):
         con.close()
         self.assertIsNone(shiki)
         self.assertIsNone(rei)
+
+
+class TestRound6Db(unittest.TestCase):
+    """第6ラウンド修正のDB挙動: 駅の置き換え、浴槽判定の unit 集約、
+    契約期間 NULL、サポート月額の保存、properties の方向保護。"""
+
+    def setUp(self):
+        import db as db_mod
+        self.tmp = Path(__file__).parent / "_tmp_test6.db"
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(self.tmp) + suf)
+            if p.exists():
+                p.unlink()
+        self.orig = db_mod.DB
+        db_mod.DB = self.tmp
+        db_mod.initialize_db()
+
+    def tearDown(self):
+        import db as db_mod
+        db_mod.DB = self.orig
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(self.tmp) + suf)
+            if p.exists():
+                p.unlink()
+
+    def _row(self, url, **kw):
+        row = {"name": "テスト", "address": "大阪市西区立売堀3",
+               "age_years": 10, "floors": 5, "structure": None,
+               "area_m2": 25.0, "layout": "1K", "floor": 3,
+               "direction": None, "rent_yen": 80000, "admin_yen": 5000,
+               "shikikin_yen": 0, "reikin_yen": 80000, "url": url,
+               "stations": [{"line": "地下鉄中央線", "name": "阿波座",
+                             "walk": 5}],
+               "nearest": {"line": "地下鉄中央線", "name": "阿波座",
+                           "walk": 5}}
+        row.update(kw)
+        return row
+
+    def _detail(self, **kw):
+        d = {"rent_yen": 80000, "admin_yen": 5000, "deposit_yen": 0,
+             "key_money_yen": 80000, "hoshoukin_yen": None,
+             "shoukyaku_yen": None, "insurance_yen": None,
+             "key_exchange_yen": None, "cleaning_yen": None,
+             "support_yen": None, "support_monthly_yen": None,
+             "water_fixed_yen": None,
+             "guarantee_first_yen": None, "guarantee_renew_yen": None,
+             "agency_yen": None, "renewal_fee_yen": None,
+             "contract_months": None, "free_rent_months": 0,
+             "regular_lease": 1, "direction": None, "structure": None,
+             "floors": 5, "equipment": "", "note": "", "stations": [],
+             "area_m2": None}
+        d.update(kw)
+        return d
+
+    def _lid_uid(self, con, url):
+        return con.execute(
+            "SELECT id, unit_id FROM listings WHERE url=?",
+            (url,)).fetchone()
+
+    def test_detail_stations_replace_and_list_keeps(self):
+        import db as db_mod
+        import scraper
+        from detail_scraper import apply_detail
+        url = "https://suumo.jp/chintai/jnc_000999999901/"
+        scraper.save([self._row(url)])
+        con = db_mod.connect_db()
+        lid, uid = self._lid_uid(con, url)
+        apply_detail(con, lid, uid, url, self._detail(stations=[
+            {"line": "地下鉄中央線", "name": "阿波座", "walk": 4},
+            {"line": "地下鉄四つ橋線", "name": "本町", "walk": 9}]))
+        con.commit()
+        got = {(n, w) for n, w in con.execute(
+            "SELECT name, walk_min FROM stations WHERE unit_id=?", (uid,))}
+        # 一覧値（阿波座5分）は詳細値で置き換わっている
+        self.assertEqual(got, {("阿波座", 4), ("本町", 9)})
+        con.close()
+        # 翌日の一覧再保存でも詳細由来の駅は上書きされない
+        scraper.save([self._row(url)])
+        con = db_mod.connect_db()
+        got = {(n, w) for n, w in con.execute(
+            "SELECT name, walk_min FROM stations WHERE unit_id=?", (uid,))}
+        con.close()
+        self.assertEqual(got, {("阿波座", 4), ("本町", 9)})
+
+    def test_tub_aggregation_tub_wins(self):
+        import db as db_mod
+        import scraper
+        from detail_scraper import apply_detail
+        url_a = "https://suumo.jp/chintai/jnc_000999999902/"
+        url_b = "https://suumo.jp/chintai/jnc_000999999903/"
+        scraper.save([self._row(url_a), self._row(url_b)])
+        con = db_mod.connect_db()
+        la, ua = self._lid_uid(con, url_a)
+        lb, ub = self._lid_uid(con, url_b)
+        self.assertEqual(ua, ub)  # 同じ部屋の複数掲載
+        apply_detail(con, lb, ub, url_b,
+                     self._detail(equipment="シャワーのみ"))
+        con.commit()
+        st = con.execute("SELECT tub_status FROM units WHERE id=?",
+                         (ua,)).fetchone()[0]
+        self.assertEqual(st, "confirmed_no_tub")
+        apply_detail(con, la, ua, url_a,
+                     self._detail(equipment="バストイレ別、エアコン"))
+        con.commit()
+        st = con.execute("SELECT tub_status FROM units WHERE id=?",
+                         (ua,)).fetchone()[0]
+        # 兄弟 listing に浴槽証拠があれば unit は湯船側に倒れる
+        self.assertEqual(st, "likely_tub")
+        hbs = {r[0] for r in con.execute(
+            "SELECT has_bathtub FROM properties WHERE detail_url IN (?,?)",
+            (url_a, url_b))}
+        self.assertEqual(hbs, {1})
+        # 湯船なし側の詳細を再適用しても last-writer-wins で戻らない
+        apply_detail(con, lb, ub, url_b,
+                     self._detail(equipment="シャワーのみ"))
+        con.commit()
+        st = con.execute("SELECT tub_status FROM units WHERE id=?",
+                         (ua,)).fetchone()[0]
+        con.close()
+        self.assertEqual(st, "likely_tub")
+
+    def test_costs_contract_null_and_support_monthly(self):
+        import db as db_mod
+        import scraper
+        from detail_scraper import apply_detail
+        url = "https://suumo.jp/chintai/jnc_000999999904/"
+        scraper.save([self._row(url)])
+        con = db_mod.connect_db()
+        lid, uid = self._lid_uid(con, url)
+        # 未取得行の contract_months は 24 で埋めず NULL
+        cm = con.execute("SELECT contract_months FROM costs"
+                         " WHERE listing_id=?", (lid,)).fetchone()[0]
+        self.assertIsNone(cm)
+        apply_detail(con, lid, uid, url, self._detail(
+            support_monthly_yen=880, equipment="エアコン"))
+        con.commit()
+        cm, sm = con.execute(
+            "SELECT contract_months, support_monthly_yen FROM costs"
+            " WHERE listing_id=?", (lid,)).fetchone()
+        con.close()
+        # 契約期間が読めない詳細でも NULL のまま（消費側が24で按分）
+        self.assertIsNone(cm)
+        self.assertEqual(sm, 880)
+
+    def test_properties_direction_survives_list_resave(self):
+        import db as db_mod
+        import scraper
+        from detail_scraper import apply_detail
+        url = "https://suumo.jp/chintai/jnc_000999999905/"
+        scraper.save([self._row(url)])
+        con = db_mod.connect_db()
+        lid, uid = self._lid_uid(con, url)
+        apply_detail(con, lid, uid, url,
+                     self._detail(direction="南", equipment="エアコン"))
+        con.commit()
+        con.close()
+        scraper.save([self._row(url)])  # 一覧再保存（direction は来ない）
+        con = db_mod.connect_db()
+        direc = con.execute("SELECT direction FROM properties"
+                            " WHERE detail_url=?", (url,)).fetchone()[0]
+        con.close()
+        self.assertEqual(direc, "南")
 
 
 class TestTimestampsUtc(unittest.TestCase):

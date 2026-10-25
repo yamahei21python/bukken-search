@@ -17,7 +17,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from models import judge_tub
+from models import aggregate_tub_status, judge_tub
 from db import connect_db
 from parse_suumo import canonical_url, parse_detail
 from scrape_common import fetch_soup, sleep_with_jitter
@@ -84,12 +84,29 @@ def _parse_and_apply_detail(con, lid, uid, url, source, include_equipment=False)
 
 def apply_detail(con, lid, uid, url, d):
     status, kw, conf = judge_tub(d)
-    hb = _TUB_INT.get(status, -1)
     note = (d.get("note") or "")
     if d.get("hoshoukin_yen") is not None:
         note += f" 保証金{d['hoshoukin_yen']}"
     if d.get("shoukyaku_yen") is not None:
         note += f" 敷引償却{d['shoukyaku_yen']}"
+
+    # 判定は evidence に残してから unit 単位で集約する。従来は
+    # listing ごとの判定で units / properties を上書きしており
+    # （last-writer-wins）、最後に取得した listing の誤判定が
+    # unit 全体に広がっていた。集約では強い浴槽証拠が1件でも
+    # あれば unit は湯船側になる。
+    con.execute("DELETE FROM evidence WHERE unit_id=? AND url=?"
+                " AND method='detail_parse'", (uid, url))
+    con.execute("INSERT INTO evidence(unit_id,tub_status,quote,url,method,"
+                "confidence) VALUES(?,?,?,?,?,?)",
+                (uid, status,
+                 (kw + " | " + (d.get("equipment") or ""))[:400],
+                 url, "detail_parse", conf))
+    verdicts = con.execute(
+        "SELECT tub_status, confidence FROM evidence"
+        " WHERE unit_id=? AND method='detail_parse'", (uid,)).fetchall()
+    status, conf = aggregate_tub_status(verdicts)
+    hb = _TUB_INT.get(status, -1)
 
     con.execute("UPDATE listings SET rent_yen=COALESCE(?,rent_yen),"
                 " admin_yen=COALESCE(?,admin_yen), shikikin=?, reikin=?,"
@@ -120,25 +137,41 @@ def apply_detail(con, lid, uid, url, d):
          canonical_url(url)))
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
-                (status, conf, d["direction"], uid))
+                (status, conf, d.get("direction"), uid))
+    # 専有面積は詳細（一覧より正確）で units を補正する。従来は
+    # 一覧値のまま固定され、実ページ突合で 4/60件ずれていた。
+    # UNIQUE(building_id,floor,area_m2,layout) に衝突する場合は
+    # 補正を見送る（別住戸と誤統合しないため）。
+    if d.get("area_m2"):
+        urow = con.execute("SELECT building_id, floor, layout FROM units"
+                           " WHERE id=?", (uid,)).fetchone()
+        if urow:
+            clash = con.execute(
+                "SELECT id FROM units WHERE building_id=? AND floor IS ?"
+                " AND layout=? AND area_m2=? AND id<>?",
+                (urow[0], urow[1], urow[2], d["area_m2"], uid)).fetchone()
+            if not clash:
+                con.execute("UPDATE units SET area_m2=? WHERE id=?",
+                            (d["area_m2"], uid))
     # バスタブは部屋（ユニット）の属性なので、同一ユニットの別掲載
     # （他仲介 listings に紐づく properties）にも同じ判定を伝える。
     # 従来は掲載ごとに判定が食い違い、参照先で割れていた（61件）。
     con.execute("UPDATE properties SET has_bathtub=? WHERE detail_url IN"
                 " (SELECT url FROM listings WHERE unit_id=?)", (hb, uid))
-    # 詳細側の駅情報を stations へマージする（従来は parse しても
-    # 捨てていた）。詳細の徒歩は一覧より正確なことが多く、一覧に
-    # 無い駅も拾える。詳細値を正として既存行も更新する。
-    for s in d.get("stations") or []:
-        if not s.get("name"):
-            continue
-        con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,"
-                    "walk_min) VALUES(?,?,?,?)",
-                    (uid, s["name"], s.get("line") or "", s.get("walk")))
-        if s.get("walk") is not None:
-            con.execute("UPDATE stations SET walk_min=? WHERE unit_id=?"
-                        " AND name=? AND line=?",
-                        (s["walk"], uid, s["name"], s.get("line") or ""))
+    # 詳細側の駅情報で stations を置き換える。従来は一覧側と
+    # union マージしていたため、一覧カセットに混入した仲介店舗の
+    # 駅（物件と無関係な「四ツ橋駅 歩1分」等）が永遠に残り、
+    # 最寄り駅・徒歩が誤っていた。詳細の駅は物件情報ブロック
+    # 由来で正確なため、返ってきた場合は丸ごと差し替える。
+    dstations = d.get("stations") or []
+    if dstations:
+        con.execute("DELETE FROM stations WHERE unit_id=?", (uid,))
+        for s in dstations:
+            if not s.get("name"):
+                continue
+            con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,"
+                        "walk_min) VALUES(?,?,?,?)",
+                        (uid, s["name"], s.get("line") or "", s.get("walk")))
     near = con.execute("SELECT name, walk_min FROM stations"
                        " WHERE unit_id=? AND walk_min IS NOT NULL"
                        " ORDER BY walk_min LIMIT 1", (uid,)).fetchone()
@@ -183,12 +216,7 @@ def apply_detail(con, lid, uid, url, d):
     con.execute("INSERT INTO listing_snapshots(listing_id,rent_yen,admin_yen,"
                 "active,equip_text) VALUES(?,?,?,1,?)",
                 (lid, d["rent_yen"], d["admin_yen"], d["equipment"][:2000]))
-    con.execute("DELETE FROM evidence WHERE unit_id=? AND url=?"
-                " AND method='detail_parse'", (uid, url))
-    con.execute("INSERT INTO evidence(unit_id,tub_status,quote,url,method,"
-                "confidence) VALUES(?,?,?,?,?,?)",
-                (uid, status, (kw + " | " + d["equipment"][:400]), url,
-                 "detail_parse", conf))
+    # （evidence の記録と unit 集約は関数の冒頭で行う）
     # 設備テキストを amenities へ分解（従来は未投入で常に0件だった）
     # 設備でない長文（PR文・物件概要の塊が混入したケースがある）は
     # アメニティ名として登録しない。
@@ -200,14 +228,18 @@ def apply_detail(con, lid, uid, url, d):
     con.execute(
         "INSERT OR REPLACE INTO costs(listing_id,key_money_yen,deposit_yen,"
         "agency_yen,guarantee_first_yen,guarantee_renew_yen,insurance_yen,"
-        "key_exchange_yen,cleaning_yen,support_yen,water_fixed_yen,"
-        "renewal_fee_yen,contract_months,free_rent_months,regular_lease,"
-        "fetched,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
+        "key_exchange_yen,cleaning_yen,support_yen,support_monthly_yen,"
+        "water_fixed_yen,renewal_fee_yen,contract_months,free_rent_months,"
+        "regular_lease,fetched,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
         (lid, d["key_money_yen"], d["deposit_yen"], d.get("agency_yen"),
          d["guarantee_first_yen"], d.get("guarantee_renew_yen"),
          d["insurance_yen"], d["key_exchange_yen"],
-         d["cleaning_yen"], d["support_yen"], d["water_fixed_yen"],
-         d["renewal_fee_yen"], d["contract_months"] or 24,
+         d["cleaning_yen"], d["support_yen"], d.get("support_monthly_yen"),
+         d["water_fixed_yen"],
+         # 契約期間が読めない場合は NULL のままにする。従来は
+         # `or 24` で埋めており「本当に2年」と区別できなかった
+         # （按分のフォールバックは消費側が持つ）。
+         d["renewal_fee_yen"], d.get("contract_months"),
          d["free_rent_months"], d["regular_lease"], note[:500]))
 
 

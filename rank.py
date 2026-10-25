@@ -18,7 +18,8 @@ rows = con.execute(
     """SELECT b.name, b.norm_address, b.autolock, l.rent_yen rent, l.admin_yen admin,
        u.layout, u.area_m2 area, u.floor, u.tub_status,
        (SELECT MIN(walk_min) FROM stations s WHERE s.unit_id=u.id) walk_min,
-       c.water_fixed_yen water, c.support_yen sup, c.guarantee_renew_yen gren,
+       c.water_fixed_yen water, c.support_yen sup,
+       c.support_monthly_yen supm, c.guarantee_renew_yen gren,
        c.renewal_fee_yen rf, c.contract_months cm,
        c.key_money_yen km, c.deposit_yen dep, c.agency_yen ag,
        c.guarantee_first_yen gf, c.insurance_yen ins, c.key_exchange_yen kx,
@@ -47,10 +48,12 @@ for r in rows:
         + (r["ins"] or 0) + (r["kx"] or 0) + (r["cl"] or 0)
     init_total = nonrefund + (r["dep"] or 0)
     fetched = r["fetched"] if "fetched" in r.keys() else 0
-    eff = effective_monthly(r["rent"], r["admin"], r["water"], r["sup"],
-                            r["gren"], r["rf"], r["cm"] or 24, nonrefund)
+    eff = effective_monthly(r["rent"], r["admin"], r["water"], 0,
+                            r["gren"], r["rf"], r["cm"] or 24, nonrefund,
+                            support_monthly=r["supm"])
     t2 = total_2year(r["rent"], r["admin"], init_total, r["rf"],
-                     r["gren"], r["fr"])
+                     r["gren"], r["fr"], support_once=r["sup"],
+                     support_monthly=r["supm"], contract_months=r["cm"])
     missing = r["walk_min"] is None or not r["ev"]
     sc, reasons = score_unit(dict(total=total, tub_status=r["tub_status"],
                                   walk_min=r["walk_min"], area=r["area"],
