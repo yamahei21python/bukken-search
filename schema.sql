@@ -27,8 +27,9 @@ CREATE TABLE IF NOT EXISTS costs(
  key_money_yen INTEGER, deposit_yen INTEGER, agency_yen INTEGER,
  guarantee_first_yen INTEGER, guarantee_renew_yen INTEGER,
  insurance_yen INTEGER, key_exchange_yen INTEGER, cleaning_yen INTEGER,
- support_yen INTEGER, water_fixed_yen INTEGER, renewal_fee_yen INTEGER,
- contract_months INTEGER DEFAULT 24, free_rent_months REAL DEFAULT 0,
+ support_yen INTEGER, support_monthly_yen INTEGER,
+ water_fixed_yen INTEGER, renewal_fee_yen INTEGER,
+ contract_months INTEGER, free_rent_months REAL DEFAULT 0,
  regular_lease INTEGER DEFAULT 1, fetched INTEGER DEFAULT 0, note TEXT);
 CREATE TABLE IF NOT EXISTS stations(
  id INTEGER PRIMARY KEY AUTOINCREMENT, unit_id INTEGER REFERENCES units(id),

@@ -103,12 +103,25 @@ def _get_or_create_unit(con, bid, r):
 def _save_stations(con, uid, stations, nearest):
     if not uid:
         return
-    seen = set()
+    # 詳細取得済みの unit の駅は、詳細側（物件情報ブロック由来）で
+    # 置き換え済み。一覧カセットには仲介店舗の駅が混入しうるため、
+    # 一覧側の値で上書き・追加しない。
+    fetched = con.execute(
+        "SELECT 1 FROM listings l JOIN costs c ON c.listing_id=l.id"
+        " WHERE l.unit_id=? AND c.fetched=1 LIMIT 1", (uid,)).fetchone()
+    if fetched:
+        return
+    # 駅名で dedup し、最大3件まで（SUUMO が物件に付ける駅の上限）
+    existing = {r[0] for r in con.execute(
+        "SELECT name FROM stations WHERE unit_id=?", (uid,))}
     for s in stations or []:
-        seen.add((s["name"], s["line"]))
+        if len(existing) >= 3 or s["name"] in existing:
+            continue
+        existing.add(s["name"])
         con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,walk_min)"
                     " VALUES(?,?,?,?)", (uid, s["name"], s["line"], s["walk"]))
-    if not stations and nearest.get("name"):
+    if not stations and nearest.get("name") \
+            and nearest["name"] not in existing and len(existing) < 3:
         con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,walk_min)"
                     " VALUES(?,?,?,?)",
                     (uid, nearest["name"], nearest.get("line"), nearest["walk"]))
@@ -153,8 +166,8 @@ def save(rows):
                  _txt(r["shikikin_yen"]), _txt(r["reikin_yen"])))
             lid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
         con.execute("INSERT OR IGNORE INTO costs(listing_id,key_money_yen,"
-                    "deposit_yen,fetched) VALUES(?,?,?,0)",
-                    (lid, r["reikin_yen"], r["shikikin_yen"]))
+                    "deposit_yen,contract_months,fetched) VALUES(?,?,?,?,0)",
+                    (lid, r["reikin_yen"], r["shikikin_yen"], None))
         # ON CONFLICT で更新する。INSERT OR REPLACE だと行が作り直され、
         # 詳細取得で入れた equipment / has_bathtub が一覧の再取得のたびに
         # 消えてしまうため、一覧由来の列だけを更新する。
@@ -182,8 +195,13 @@ def save(rows):
             " total_yen=excluded.total_yen,"
             " shikikin_yen=excluded.shikikin_yen,"
             " reikin_yen=excluded.reikin_yen,layout=excluded.layout,"
-            " area_m2=excluded.area_m2,direction=excluded.direction,"
-            " structure=excluded.structure,floors=excluded.floors,"
+            " area_m2=excluded.area_m2,"
+            # direction/structure は一覧側に情報源が無く常に NULL が
+            # 来るため、詳細で埋めた値を COALESCE で保護する
+            # （従来は毎日の一覧保存で NULL に潰れていた）
+            " direction=COALESCE(excluded.direction,properties.direction),"
+            " structure=COALESCE(excluded.structure,properties.structure),"
+            " floors=excluded.floors,"
             " scraped_at=excluded.scraped_at",
             (r["name"], r["address"], r["nearest"]["name"],
              r["nearest"]["walk"], r["age_years"], r["floor"], rent, admin,
