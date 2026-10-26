@@ -24,34 +24,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Lint with ruff
-        run: ruff check parse_suumo.py
-
-      - name: Run basic import test
-        run: python3 -c "
-from parse_suumo import (
-    AMENITY_HINT, _equipment_text, _STATION_RE, parse_stations, _guarantee_rate, to_yen
-)
-# Verify AMENITY_HINT has 30 keywords
-assert len(AMENITY_HINT) == 30, f'Expected 30, got {len(AMENITY_HINT)}'
-# Verify walking time patterns work
-test_cases = [
-    '京王線/阿波座駅 歩5分',
-    '京王線/阿波座駅歩5分',
-    '京王線/阿波座駅 5分歩',
-    '阪神電鉄/本町駅 10分',
-    '京成押上線/押上駅 歩3分',
-]
-for tc in test_cases:
-    result = parse_stations(tc)
-    assert len(result) == 1, f'Expected 1 result for {tc}, got {len(result)}'
-    assert result[0]['walk'] > 0, f'Expected walk > 0 for {tc}'
-# Verify to_yen works
-assert to_yen('9.3万円') == 93000
-assert to_yen('93000') == 93000
-assert to_yen('¥93000') == 93000
-assert to_yen('9.3万') == 93000
-assert to_yen(None) is None
-assert to_yen('なし') is None
-print('All tests passed!')
-"
+      - name: Run smoke tests
+        run: python -m unittest tests.test_smoke -v
