@@ -13,6 +13,7 @@
   python3 scraper.py --list-html path/to/list.html     # 保存済みHTMLを解析(オフライン)
 """
 import argparse
+import sqlite3
 from pathlib import Path
 
 import yaml
@@ -85,15 +86,32 @@ def _get_or_create_building(con, r):
 def _get_or_create_unit(con, bid, r):
     if not r["area_m2"]:
         return None
-    row = con.execute(
-        "SELECT id FROM units WHERE building_id=? AND layout=? "
-        "AND abs(area_m2-?)<=0.3 AND (floor IS ? OR floor=?)"
-        " AND (direction IS ? OR direction=? OR ? IS NULL)",
-        (bid, r["layout"], r["area_m2"], r["floor"], r["floor"],
-         r.get("direction"), r.get("direction"),
-         r.get("direction"))).fetchone()
+    base = ("SELECT id, floor FROM units WHERE building_id=? AND layout=? "
+            "AND abs(area_m2-?)<=0.3"
+            " AND (direction IS ? OR direction=? OR ? IS NULL)")
+    params = (bid, r["layout"], r["area_m2"], r.get("direction"),
+              r.get("direction"), r.get("direction"))
+    # 1段目: 厳密照合（階が一致、または両方とも NULL）
+    row = con.execute(base + " AND (floor IS ? OR floor=?)",
+                      params + (r["floor"], r["floor"])).fetchone()
+    if row is None:
+        # 2段目 (F6): どちらか一方の階が NULL の unit も候補にする。
+        # 候補が複数ある場合は別室の可能性があるため推測で寄せない。
+        cands = con.execute(base + " AND (floor IS NULL OR ? IS NULL)",
+                            params + (r["floor"],)).fetchall()
+        if len(cands) == 1:
+            row = cands[0]
     if row:
-        return row[0]
+        uid, ufloor = row
+        if ufloor is None and r["floor"] is not None:
+            # 階数の補完: 照合できた unit に今回分かった階を埋める
+            try:
+                con.execute(
+                    "UPDATE units SET floor=? WHERE id=? AND floor IS NULL",
+                    (r["floor"], uid))
+            except sqlite3.IntegrityError:
+                pass  # UNIQUE(building,floor,area,layout) 競合時は補完のみ諦める
+        return uid
     con.execute("INSERT INTO units(building_id,floor,area_m2,layout,direction)"
                 " VALUES(?,?,?,?,?)",
                 (bid, r["floor"], r["area_m2"], r["layout"], r.get("direction")))

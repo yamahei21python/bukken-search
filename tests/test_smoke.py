@@ -395,6 +395,75 @@ class TestSavePreservesDetail(unittest.TestCase):
         self.assertIsNone(rei)
 
 
+class TestUnitFloorMatchF6(unittest.TestCase):
+    """F6: 階数 NULL の unit 突合（2段照合）と階数補完。"""
+
+    def setUp(self):
+        import db as db_mod
+        self.tmp = Path(__file__).parent / "_tmp_test_f6.db"
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(self.tmp) + suf)
+            if p.exists():
+                p.unlink()
+        self.orig = db_mod.DB
+        db_mod.DB = self.tmp
+        db_mod.initialize_db()
+
+    def tearDown(self):
+        import db as db_mod
+        db_mod.DB = self.orig
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(self.tmp) + suf)
+            if p.exists():
+                p.unlink()
+
+    @staticmethod
+    def _row(url, floor):
+        return {"name": "F6テスト", "address": "大阪市西区立売堀3",
+                "age_years": 10, "floors": 5, "structure": "鉄筋系",
+                "area_m2": 25.0, "layout": "1K", "floor": floor,
+                "direction": None, "rent_yen": 80000, "admin_yen": 5000,
+                "shikikin_yen": None, "reikin_yen": None, "url": url,
+                "stations": [], "nearest": {"line": "地下鉄中央線",
+                                            "name": "阿波座", "walk": 5}}
+
+    def _units(self):
+        import db as db_mod
+        con = db_mod.connect_db()
+        rows = con.execute("SELECT floor FROM units ORDER BY id").fetchall()
+        con.close()
+        return [r[0] for r in rows]
+
+    def test_null_first_then_floored_backfills(self):
+        import scraper
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6a/", None)])
+        self.assertEqual(self._units(), [None])
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6b/", 3)])
+        # 同一 unit に寄り、階が補完される（unit は増えない）
+        self.assertEqual(self._units(), [3])
+
+    def test_floored_first_then_null_attaches(self):
+        import scraper
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6c/", 3)])
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6d/", None)])
+        self.assertEqual(self._units(), [3])
+
+    def test_ambiguous_null_does_not_merge(self):
+        import scraper
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6e/", 3)])
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6f/", 5)])
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6g/", None)])
+        # 3F/5F のどちらか推測せず、NULL のまま別 unit
+        self.assertEqual(sorted(self._units(), key=lambda v: (v is None, v)),
+                         [3, 5, None])
+
+    def test_different_floors_stay_split(self):
+        import scraper
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6h/", 3)])
+        scraper.save([self._row("https://suumo.jp/chintai/jnc_f6i/", 5)])
+        self.assertEqual(sorted(self._units()), [3, 5])
+
+
 class TestRound6Db(unittest.TestCase):
     """第6ラウンド修正のDB挙動: 駅の置き換え、浴槽判定の unit 集約、
     契約期間 NULL、サポート月額の保存、properties の方向保護。"""
