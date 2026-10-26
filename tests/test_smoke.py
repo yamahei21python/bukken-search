@@ -14,7 +14,8 @@ from bs4 import BeautifulSoup
 from models import judge_tub, score_unit
 from parse_suumo import (money_pair, parse_detail, to_yen, nfkc, _find_yen,
                          _guarantee_first_yen, _guarantee_rate,
-                         _guard_rent_multiple, _labeled_yen, _list_row)
+                         _guard_rent_multiple, _labeled_yen, _list_row,
+                         normalize_building_name)
 
 
 class TestMoney(unittest.TestCase):
@@ -34,6 +35,29 @@ class TestMoney(unittest.TestCase):
 
     def test_money_pair_normal(self):
         self.assertEqual(money_pair("9.3万円 10000円"), (93000, 10000))
+
+
+class TestNormalizeBuildingName(unittest.TestCase):
+    def test_reading_parens_stripped(self):
+        # F5: 読みだけの括弧は落として同一キーに寄せる
+        self.assertEqual(normalize_building_name("Da Vinchi(ダ ヴィンチ)"),
+                         normalize_building_name("Da Vinchi"))
+        self.assertEqual(normalize_building_name("VERDE EBISU(ヴェルデエビス)"),
+                         normalize_building_name("VERDE EBISU"))
+        self.assertEqual(normalize_building_name("Da Vinchi（ダ ヴィンチ）阿波座"),
+                         normalize_building_name("Da Vinchi阿波座"))
+
+    def test_meaningful_parens_kept(self):
+        # F5: 漢字を含む意味のある括弧は保持する
+        self.assertIn("南館", normalize_building_name("テストマンション（南館）"))
+        self.assertIn("別館", normalize_building_name("テストマンション(別館)"))
+
+    def test_middle_dot_removed(self):
+        # F5: 中点ゆれを同一キーに寄せる
+        self.assertEqual(normalize_building_name("ラ・フォンテ阿波座"),
+                         normalize_building_name("ラフォンテ阿波座"))
+        self.assertEqual(normalize_building_name("ミナト・レジデンス難波I"),
+                         normalize_building_name("ミナトレジデンス難波I"))
 
 
 class TestJudgeTub(unittest.TestCase):
