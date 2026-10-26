@@ -31,6 +31,11 @@ _COSTS_COLUMNS = [
     ("renewal_admin_fee_yen", "INTEGER"),
 ]
 
+# 死にカラムの撤去（書き手が無く常に NULL だった列）
+_DROP_COLUMNS = [
+    ("evidence", "photo_url"),
+]
+
 
 def connect_db() -> sqlite3.Connection:
     """共通DB接続。呼び出し側がcommit/closeを管理。"""
@@ -69,6 +74,11 @@ def initialize_db(rebuild: bool = False) -> None:
         for name, kind in _COSTS_COLUMNS:
             if name not in cost_columns:
                 con.execute(f"ALTER TABLE costs ADD COLUMN {name} {kind}")
+        for table, name in _DROP_COLUMNS:
+            tcols = {row[1] for row in
+                     con.execute(f"PRAGMA table_info({table})")}
+            if name in tcols:
+                con.execute(f"ALTER TABLE {table} DROP COLUMN {name}")
         con.commit()
     finally:
         con.close()
