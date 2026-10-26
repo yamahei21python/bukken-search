@@ -130,16 +130,31 @@ def _save_stations(con, uid, stations, nearest):
     if fetched:
         return
     # 駅名で dedup し、最大3件まで（SUUMO が物件に付ける駅の上限）
-    existing = {r[0] for r in con.execute(
-        "SELECT name FROM stations WHERE unit_id=?", (uid,))}
+    existing_rows = con.execute(
+        "SELECT name, walk_min FROM stations WHERE unit_id=?",
+        (uid,)).fetchall()
+    existing = {r[0] for r in existing_rows}
+    ex_walks = [r[1] for r in existing_rows if r[1] is not None]
+    ex_min = min(ex_walks) if ex_walks else None
+
+    def _outlier(walk):
+        # F7: unit の既存の最寄りから30分超離れた駅は、別カセット由来の
+        # 混入として取り込まない（parse_stations の同一カセット内
+        # フィルタと対）
+        return (ex_min is not None and walk is not None
+                and walk > ex_min + 30)
+
     for s in stations or []:
         if len(existing) >= 3 or s["name"] in existing:
+            continue
+        if _outlier(s["walk"]):
             continue
         existing.add(s["name"])
         con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,walk_min)"
                     " VALUES(?,?,?,?)", (uid, s["name"], s["line"], s["walk"]))
     if not stations and nearest.get("name") \
-            and nearest["name"] not in existing and len(existing) < 3:
+            and nearest["name"] not in existing and len(existing) < 3 \
+            and not _outlier(nearest["walk"]):
         con.execute("INSERT OR IGNORE INTO stations(unit_id,name,line,walk_min)"
                     " VALUES(?,?,?,?)",
                     (uid, nearest["name"], nearest.get("line"), nearest["walk"]))
