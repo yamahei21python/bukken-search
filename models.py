@@ -113,6 +113,25 @@ def aggregate_tub_status(verdicts):
     return "unknown", 0.0
 
 
+def is_shower_candidate(text):
+    """シャワー候補（手動確認バケット）かどうか。
+
+    設備文にシャワー設備の言及があり、湯船の証拠（確定・推定とも）
+    が無く、湯船なし確定表現も無い文面。judge_tub が unknown を返す
+    うち「シャワーのみの可能性が高い」部屋を拾うための述語で、
+    tub_status 自体は変えない（表示・監査側でだけ使う）。
+    """
+    t = _strip_excluded(text or "")
+    shower_words = CFG["tub"].get("likely_no") or []
+    if not any(k in t for k in shower_words):
+        return False
+    if any(k in t for k in (CFG["tub"].get("confirmed_no") or [])):
+        return False
+    tub_words = (CFG["tub"].get("confirmed_yes") or []) \
+        + (CFG["tub"].get("likely_yes") or [])
+    return not any(k in t for k in tub_words)
+
+
 def judge_tub(d):
     """-> (status, keyword, confidence)
 
