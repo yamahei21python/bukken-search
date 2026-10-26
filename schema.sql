@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS amenities(unit_id INTEGER REFERENCES units(id), name 
  PRIMARY KEY(unit_id, name));
 CREATE TABLE IF NOT EXISTS evidence(
  id INTEGER PRIMARY KEY AUTOINCREMENT, unit_id INTEGER REFERENCES units(id),
- tub_status TEXT, quote TEXT, url TEXT, photo_url TEXT,
+ tub_status TEXT, quote TEXT, url TEXT,
  method TEXT, confidence REAL,
  checked_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS favorites(unit_id INTEGER PRIMARY KEY REFERENCES units(id),
