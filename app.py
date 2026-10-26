@@ -15,16 +15,25 @@ try:
     df = pd.read_sql_query(
         """SELECT b.name, l.rent_yen, l.admin_yen, l.rent_yen+COALESCE(l.admin_yen,0) total,
            u.layout, u.area_m2, u.floor, u.tub_status, l.url,
+           p.equipment equip,
            (SELECT MIN(walk_min) FROM stations s WHERE s.unit_id=u.id) walk_min,
            (SELECT quote FROM evidence e WHERE e.unit_id=u.id ORDER BY e.checked_at DESC LIMIT 1) evidence
            FROM listings l JOIN units u ON u.id=l.unit_id
-           JOIN buildings b ON b.id=u.building_id WHERE l.active=1""", con)
+           JOIN buildings b ON b.id=u.building_id
+           LEFT JOIN properties p ON p.detail_url=l.url WHERE l.active=1""", con)
 except Exception as e:
     st.error(f"DBのスキーマが想定と違います（db_audit.py で状態を確認できます）: {e}")
     st.stop()
 df = df[df["total"] <= max_total]
 if tub:
     df = df[df["tub_status"].isin(tub)]
+shower_only = st.checkbox(
+    "シャワー候補のみ（湯船未判定で、設備にシャワー言及あり・湯船証拠なし）",
+    value=False)
+if shower_only:
+    import models
+    df = df[(df["tub_status"] == "unknown")
+            & df["equip"].fillna("").map(models.is_shower_candidate)]
 st.write(f"hit: {len(df)}")
 st.dataframe(df)
 st.download_button("CSV出力", df.to_csv(index=False), "bukken.csv")
