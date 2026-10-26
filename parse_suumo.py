@@ -35,7 +35,13 @@ _LAYOUT_RE = re.compile(r"(ワンルーム|\d[SLDK]{1,4})")
 
 
 def nfkc(s):
-    return unicodedata.normalize("NFKC", s or "").replace("\xa0", " ")
+    t = unicodedata.normalize("NFKC", s or "").replace("\xa0", " ")
+    # 「10、000円」のような桁区切り混じりの金額を1つの数値として
+    # 読めるよう、数字に挟まれた読点だけを落とす（一般の読点は保持）
+    t = re.sub(r"(?<=\d)、(?=\d)", "", t)
+    # 空白区切りは千区切りの形（空白の後にちょうど3桁が続く）だけを
+    # 対象にする（「10 000円」。日付・電話番号等の空白は壊さない）
+    return re.sub(r"(?<=\d) (?=\d{3}(?!\d))", "", t)
 
 
 def _int(m):
@@ -61,6 +67,16 @@ def to_yen(tok):
     if any(k in t for k in ("なし", "不要", "無料", "込")):
         return 0
     return None
+
+
+def _guard_rent_multiple(value, rent, max_months=12):
+    """敷金・礼金等の異常値ガード。仲介側が円額を万円欄に入力した
+    ケース（実例「敷金: 435600万円」=43.5億円、家賃6.6万円）を通さない。
+    住宅の敷金・礼金・保証金は通常0〜数ヶ月分で、12ヶ月分超は誤記。
+    詳細側にあったガードを一覧・詳細の共通関数にした。"""
+    if value is not None and rent and value > rent * max_months:
+        return None
+    return value
 
 
 def money_pair(cell):
@@ -191,6 +207,9 @@ def _list_row(row, base):
         # 総額が約2倍になり rank/app から消えるため欠落扱いにする。
         admin = None
     shiki, rei = money_pair(cell(4))
+    # 詳細側と同じ異常値ガード（一覧値は未取得物件では costs にも流れる）
+    shiki = _guard_rent_multiple(shiki, rent)
+    rei = _guard_rent_multiple(rei, rent)
     layout = ""
     ml = _LAYOUT_RE.search(cell(5))
     if ml:
@@ -248,8 +267,27 @@ def _first_value(seg, rent):
     if any(k in seg for k in ("なし", "不要", "無料")) \
             and not re.search(r"[\d,]+\s*(?:万円|円)", seg):
         return 0
+    # 段階制（「15万円未満10,000円/年 15万円以上14,000円/年」）では
+    # 先頭の金額が閾値そのものなので、賃料が属する段の金額を返す。
+    # 属する段の金額が読めない（末尾切断等）場合は誤読を避け None。
+    if rent:
+        mb = re.search(r"([\d,]+(?:\.\d+)?)\s*万円未満\s*"
+                       r"([\d,]+(?:\.\d+)?\s*万円|[\d,]+\s*円)", seg)
+        ma = re.search(r"([\d,]+(?:\.\d+)?)\s*万円以上\s*"
+                       r"([\d,]+(?:\.\d+)?\s*万円|[\d,]+\s*円)", seg)
+        if mb or ma:
+            th = float((mb or ma).group(1).replace(",", "")) * 10000
+            if rent < th:
+                return to_yen(mb.group(2)) if mb else None
+            return to_yen(ma.group(2)) if ma else None
     best = None
-    am = re.search(r"[\d,]+(?:\.\d+)?\s*万円|[\d,]+(?:\.\d+)?\s*円", seg)
+    am = None
+    for cand in re.finditer(r"[\d,]+(?:\.\d+)?\s*万円|[\d,]+(?:\.\d+)?\s*円",
+                            seg):
+        if seg[cand.end():cand.end() + 2] in ("未満", "以上"):
+            continue  # 段階制の閾値は金額として採用しない
+        am = cand
+        break
     if am:
         best = (am.start(), to_yen(am.group(0)))
     if rent:
@@ -280,11 +318,33 @@ def _labeled_yen(text, label_re, rent, window=40):
 def _guarantee_rate(text):
     t = nfkc(text or "")
     for pat in (r"初回[^0-9]{0,10}(\d{1,3})\s*[%％]",
-                r"総賃料の(\d{1,3})\s*[%％]",
-                r"賃料[等]?[^0-9]{0,8}(\d{1,3})\s*[%％]"):
+                r"総賃料の(\d{1,3})\s*[%％]"):
         m = re.search(pat, t)
         if m:
             return int(m.group(1))
+    # 「賃料の◯%」は初回率のこともあるが、「月額賃料の1%/毎月」の
+    # ような月額保証料の率を初回率と誤認しないよう、月額文脈の
+    # マッチは採用しない（実例: 初回保証料10,000円の物件が ¥630 化）
+    for m in re.finditer(r"賃料[等]?[^0-9]{0,8}(\d{1,3})\s*[%％]", t):
+        if "月額" in t[max(0, m.start() - 6):m.start()]:
+            continue
+        if "毎月" in t[m.end():m.end() + 6]:
+            continue
+        return int(m.group(1))
+    return None
+
+
+def _guarantee_first_yen(text, rent):
+    """初回保証料。固定額の明記（初回保証料/初回保証委託料 ◯円）を
+    優先し、無い場合のみ率（総賃料の◯%等）から換算する。
+    従来は率が無いと NULL 固定で、固定額のみの物件を取りこぼし、
+    率があると月額率の誤認で実額と乖離していた。"""
+    v = _labeled_yen(text or "", r"初回保証委託料|初回保証料", rent)
+    if v is not None:
+        return v
+    rate = _guarantee_rate(text)
+    if rent and rate:
+        return int(rent * rate / 100)
     return None
 
 
@@ -489,7 +549,6 @@ def parse_detail(soup):
     equipment = _equipment_text(soup)
 
     other = g.get("ほか初期費用") or g.get("ほか諸費用") or ""
-    guarantee_rate = _guarantee_rate(g.get("保証会社"))
     rent = price["rent"]
     contract = g.get("契約期間") or ""
     # 契約期間のパース: 「2028年3月末まで」のような定期借家の期限
@@ -512,6 +571,10 @@ def parse_detail(soup):
     # 「賃料の1ヶ月分」等の比率表記が多いため _labeled_yen で拾う。
     guarantee_renew_yen = _labeled_yen(g.get("保証会社") or "",
                                        r"更新料", rent)
+    if guarantee_renew_yen is None:
+        # 「1年更新:10,000円」型の表記（保証会社の年次更新料）
+        guarantee_renew_yen = _labeled_yen(g.get("保証会社") or "",
+                                           r"年更新", rent)
     # ほか初期費用側は「更新手数料」表記しか見ておらず、主流の
     # 「更新料 15000円」「更新料 新賃料1.00ヶ月分」を取りこぼして
     # いた（備考に更新料があるのに NULL が81件、取得成功は1件）。
@@ -531,8 +594,7 @@ def parse_detail(soup):
     # 住宅の敷金・礼金・保証金は通常0〜数ヶ月分で、12ヶ月分超は誤記。
     if rent:
         for key in ("deposit", "key_money", "hoshoukin", "shoukyaku"):
-            if price[key] is not None and price[key] > rent * 12:
-                price[key] = None
+            price[key] = _guard_rent_multiple(price[key], rent)
 
     key_exchange_yen = _find_yen(other, r"鍵交換")
     cleaning_yen = _cleaning_yen(other)
@@ -582,8 +644,7 @@ def parse_detail(soup):
         "cleaning_yen": cleaning_yen,
         "support_yen": support_yen,
         "support_monthly_yen": support_monthly_yen,
-        "guarantee_first_yen": (int(rent * guarantee_rate / 100)
-                                if rent and guarantee_rate else None),
+        "guarantee_first_yen": _guarantee_first_yen(g.get("保証会社"), rent),
         "guarantee_renew_yen": guarantee_renew_yen,
         "agency_yen": _agency_yen(g, other, full, price["agency_raw"], rent),
         "renewal_fee_yen": renewal_fee_yen,

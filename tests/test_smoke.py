@@ -12,7 +12,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from bs4 import BeautifulSoup
 
 from models import judge_tub, score_unit
-from parse_suumo import money_pair, parse_detail, to_yen
+from parse_suumo import (money_pair, parse_detail, to_yen, nfkc, _find_yen,
+                         _guarantee_first_yen, _guarantee_rate,
+                         _guard_rent_multiple, _labeled_yen, _list_row)
 
 
 class TestMoney(unittest.TestCase):
@@ -541,6 +543,182 @@ class TestTimestampsUtc(unittest.TestCase):
             if "localtime" in f.read_text(encoding="utf-8"):
                 offenders.append(f.name)
         self.assertEqual(offenders, [])
+
+
+class TestAuditFixes20261026(unittest.TestCase):
+    """2026-10-26 監査所見 F1〜F4 の回帰防止。"""
+
+    def test_thousands_separators(self):
+        # F4: 読点・空白の桁区切りを全経路で読めること
+        self.assertEqual(to_yen("10、000円"), 10000)
+        self.assertEqual(to_yen("10 000円"), 10000)
+        self.assertEqual(money_pair("10、000円 66000円"), (10000, 66000))
+        self.assertEqual(_find_yen("更新料10、000円/年", r"更新料"), 10000)
+
+    def test_guard_rent_multiple(self):
+        # F2: 家賃12ヶ月分超は誤記として落とす（詳細・一覧共通）
+        self.assertIsNone(_guard_rent_multiple(4356000000, 66000))
+        self.assertEqual(_guard_rent_multiple(200000, 85000), 200000)
+        self.assertIsNone(_guard_rent_multiple(None, 66000))
+        self.assertEqual(_guard_rent_multiple(100000, None), 100000)
+
+    def test_list_row_giant_shikikin(self):
+        # F2: 一覧カセットの「敷金: 435600万円」が素通ししないこと
+        row = BeautifulSoup(
+            "<tr><td><a href='/chintai/jnc_000000000001/'>x</a></td>"
+            "<td></td><td>7階</td><td>6.6万円 7000円</td>"
+            "<td>435600万円 66000円</td><td>1K 25.5m2</td></tr>",
+            "html.parser").find("tr")
+        base = {"name": "x", "address": "y", "age_years": 10, "floors": 5,
+                "stations": [], "nearest": {"name": None, "walk": None}}
+        r = _list_row(row, base)
+        self.assertEqual(r["rent_yen"], 66000)
+        self.assertIsNone(r["shikikin_yen"])
+        self.assertEqual(r["reikin_yen"], 66000)
+
+    def test_guarantee_first_fixed_amount(self):
+        # F3: 固定額の明記が月額率の誤認より優先されること
+        self.assertEqual(
+            _guarantee_first_yen(
+                "保証会社利用必 初回保証料:10000円、以降は月額賃料の1%/毎月",
+                63000),
+            10000)
+
+    def test_guarantee_first_rates(self):
+        # F3: 率のみの場合は従来どおり換算されること
+        self.assertEqual(
+            _guarantee_first_yen("日本セーフティー利用必 総賃料の50%", 69000),
+            34500)
+        self.assertEqual(
+            _guarantee_first_yen(
+                "初回保証委託料:連帯保証人なし30%(※下限15,000円)", 90000),
+            27000)
+
+    def test_guarantee_rate_ignores_monthly(self):
+        self.assertIsNone(_guarantee_rate("以降は月額賃料の1%/毎月"))
+
+    def test_guarantee_renew_tiered(self):
+        # F3: 段階制は閾値でなく賃料が属する段の金額を読むこと
+        text = "更新料:15万円未満10,000円/年 15万円以上14,000円/年"
+        self.assertEqual(_labeled_yen(text, r"更新料", 90000), 10000)
+        self.assertEqual(_labeled_yen(text, r"更新料", 160000), 14000)
+
+    def test_guarantee_renew_known_good(self):
+        # F3: 既知の正常値が壊れないこと（比率表記・高額の正当な更新料）
+        self.assertEqual(
+            _labeled_yen("更新料 新賃料1.00ヶ月分", r"更新料", 82000), 82000)
+        self.assertEqual(
+            _labeled_yen("更新料 114000円", r"更新料", 90000), 114000)
+
+    def test_guarantee_renew_annual_label(self):
+        # F3: 「1年更新:10 000円」型（空白区切り含む）
+        self.assertEqual(
+            _labeled_yen("1年更新:10 000円 その他のプラン有", r"年更新", 81000),
+            10000)
+
+    def test_nfkc_preserves_general_text(self):
+        # F4: 桁区切り以外の読点・空白は壊さないこと
+        self.assertEqual(nfkc("浴室、洗面所"), "浴室、洗面所")
+        self.assertEqual(nfkc("2026 10月"), "2026 10月")
+        self.assertEqual(nfkc("06 6454"), "06 6454")
+        self.assertEqual(nfkc("10、000円"), "10000円")
+
+    def test_guarantee_renew_tiered_truncated(self):
+        # F3: 上段の金額が末尾切断された実文面型。下段は読め、上段は
+        # 閾値や切断途中の数字を返さず None になること
+        text = "更新料:15万円未満10,000円/年 15万円以上14,00"
+        self.assertEqual(_labeled_yen(text, r"更新料", 90000), 10000)
+        self.assertIsNone(_labeled_yen(text, r"更新料", 160000))
+
+    def test_guarantee_renew_tiered_below_only(self):
+        # F3: 下段だけの段階制。属さない側は None
+        text = "更新料:15万円未満10,000円/年"
+        self.assertEqual(_labeled_yen(text, r"更新料", 90000), 10000)
+        self.assertIsNone(_labeled_yen(text, r"更新料", 160000))
+
+    def test_guarantee_first_fixed_beats_rate(self):
+        # F3: 固定額が率より先に来なくても固定額が優先されること
+        # （rate は固定額が取れない場合のみ実行される）
+        self.assertEqual(
+            _guarantee_first_yen("総賃料の50% 初回保証料:20000円", 69000),
+            20000)
+
+
+class TestApplyDetailNullCleanup(unittest.TestCase):
+    """F2: 詳細適用時に異常値と 'None' 文字列が全層で NULL 化されること。"""
+
+    def setUp(self):
+        import db as db_mod
+        self.tmp = Path(__file__).parent / "_tmp_test.db"
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(self.tmp) + suf)
+            if p.exists():
+                p.unlink()
+        self.orig = db_mod.DB
+        db_mod.DB = self.tmp
+        db_mod.initialize_db()
+
+    def tearDown(self):
+        import db as db_mod
+        db_mod.DB = self.orig
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(self.tmp) + suf)
+            if p.exists():
+                p.unlink()
+
+    def test_abnormal_and_none_strings_cleaned(self):
+        import db as db_mod
+        import scraper
+        from detail_scraper import apply_detail
+        row = {"name": "テスト3", "address": "大阪市西区立売堀3",
+               "age_years": 10, "floors": 5, "structure": "鉄筋系",
+               "area_m2": 25.0, "layout": "1K", "floor": 3,
+               "direction": None, "rent_yen": 80000, "admin_yen": 5000,
+               "shikikin_yen": 0, "reikin_yen": 80000,
+               "url": "https://suumo.jp/chintai/jnc_000999999997/",
+               "stations": [{"line": "地下鉄中央線", "name": "阿波座",
+                             "walk": 5}],
+               "nearest": {"line": "地下鉄中央線", "name": "阿波座",
+                           "walk": 5}}
+        scraper.save([row])
+        con = db_mod.connect_db()
+        lid, uid = con.execute("SELECT id, unit_id FROM listings").fetchone()
+        # 過去の汚染を再現: properties に 'None' 文字列と異常値、
+        # listings に 'None' 文字列を植える
+        con.execute("UPDATE properties SET shikikin_yen='None',"
+                    " reikin_yen=4356000000")
+        con.execute("UPDATE listings SET shikikin='None' WHERE id=?", (lid,))
+        con.commit()
+        d = {"rent_yen": 80000, "admin_yen": 5000, "deposit_yen": None,
+             "key_money_yen": None, "hoshoukin_yen": None,
+             "shoukyaku_yen": None, "insurance_yen": None,
+             "key_exchange_yen": None, "cleaning_yen": None,
+             "support_yen": None, "support_monthly_yen": None,
+             "water_fixed_yen": None,
+             "guarantee_first_yen": None, "guarantee_renew_yen": None,
+             "agency_yen": None, "renewal_fee_yen": None,
+             "contract_months": 24, "free_rent_months": 0,
+             "regular_lease": 1, "direction": "南", "structure": "鉄筋系",
+             "floors": 5, "building_age_years": 10,
+             "equipment": "シャワールーム", "note": "",
+             "stations": [{"line": "地下鉄中央線", "name": "阿波座",
+                           "walk": 4}]}
+        apply_detail(con, lid, uid, row["url"], d)
+        con.commit()
+        shiki, rei, t_shiki = con.execute(
+            "SELECT shikikin_yen, reikin_yen, typeof(shikikin_yen)"
+            " FROM properties").fetchone()
+        l_shiki = con.execute(
+            "SELECT shikikin FROM listings WHERE id=?", (lid,)).fetchone()[0]
+        c_dep = con.execute(
+            "SELECT typeof(deposit_yen) FROM costs WHERE listing_id=?",
+            (lid,)).fetchone()[0]
+        con.close()
+        self.assertIsNone(shiki)
+        self.assertIsNone(rei)
+        self.assertEqual(t_shiki, "null")
+        self.assertIsNone(l_shiki)
+        self.assertEqual(c_dep, "null")
 
 
 if __name__ == "__main__":

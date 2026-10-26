@@ -135,6 +135,20 @@ def apply_detail(con, lid, uid, url, d):
          (kw + " | " + d["equipment"])[:400],
          d.get("direction"), d.get("structure"), d.get("floors"),
          canonical_url(url)))
+    # 一覧側の異常値（家賃12ヶ月分超の敷金・礼金）と、過去に混入した
+    # 文字列 'None' が properties の COALESCE 更新で生き残らないよう、
+    # 詳細取得のついでに落とす。通常値には触れない（明示NULL化のみ）。
+    # 家賃が無い/0 の行では倍率判定をしない（正常値の誤棄却防止）。
+    for col in ("shikikin_yen", "reikin_yen"):
+        con.execute(f"UPDATE properties SET {col}=NULL"
+                    " WHERE detail_url=? AND"
+                    f" ({col}='None' OR (rent_yen > 0 AND {col} > rent_yen * 12))",
+                    (canonical_url(url),))
+    # listings 側の過去の 'None' 文字列も同じタイミングで NULL 化する
+    con.execute("UPDATE listings SET shikikin=NULL"
+                " WHERE id=? AND shikikin='None'", (lid,))
+    con.execute("UPDATE listings SET reikin=NULL"
+                " WHERE id=? AND reikin='None'", (lid,))
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
                 (status, conf, d.get("direction"), uid))
