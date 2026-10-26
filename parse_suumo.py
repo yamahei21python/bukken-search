@@ -716,6 +716,14 @@ def parse_detail(soup):
     support_monthly_yen = _cap_fee(support_monthly_yen, cap=100000,
                                    check_total=False)
 
+    # 取扱店舗（掲載仲介）。listings.agent の帰属用（F10）。
+    # 表示文字列は「店舗名(株)会社名」「会社名(株)店舗名」など
+    # 順序の表記ゆれがあるため、分割せず表示のまま保持する。
+    agent_el = soup.select_one(".viewform_advance_shop-name")
+    agent = nfkc(agent_el.get_text(strip=True)) if agent_el else None
+    if not agent:
+        agent = None
+
     direction = acc.get("向き")
     if direction is not None and nfkc(direction).strip() in _DASH:
         # SUUMO の「-」は向き未公表のプレースホルダ。値として保存
@@ -758,4 +766,5 @@ def parse_detail(soup):
         "equipment": equipment,
         "note": other,
         "full": full,
+        "agent": agent,
     }
