@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS costs(
  insurance_yen INTEGER, key_exchange_yen INTEGER, cleaning_yen INTEGER,
  support_yen INTEGER, support_monthly_yen INTEGER,
  water_fixed_yen INTEGER, renewal_fee_yen INTEGER,
+ renewal_admin_fee_yen INTEGER,
  contract_months INTEGER, free_rent_months REAL DEFAULT 0,
  regular_lease INTEGER DEFAULT 1, fetched INTEGER DEFAULT 0, note TEXT);
 CREATE TABLE IF NOT EXISTS stations(
