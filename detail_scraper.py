@@ -135,6 +135,13 @@ def apply_detail(con, lid, uid, url, d):
          (kw + " | " + d["equipment"])[:400],
          d.get("direction"), d.get("structure"), d.get("floors"),
          canonical_url(url)))
+    # 一覧側の異常値（家賃12ヶ月分超の敷金・礼金）が properties の
+    # COALESCE 更新で生き残らないよう、詳細取得のついでに落とす。
+    # 通常値には触れない（異常値の明示NULL化のみ）。
+    for col in ("shikikin_yen", "reikin_yen"):
+        con.execute(f"UPDATE properties SET {col}=NULL"
+                    " WHERE detail_url=? AND rent_yen IS NOT NULL"
+                    f" AND {col} > rent_yen * 12", (canonical_url(url),))
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
                 (status, conf, d.get("direction"), uid))

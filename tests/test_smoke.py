@@ -12,7 +12,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from bs4 import BeautifulSoup
 
 from models import judge_tub, score_unit
-from parse_suumo import money_pair, parse_detail, to_yen
+from parse_suumo import (money_pair, parse_detail, to_yen, _find_yen,
+                         _guarantee_first_yen, _guarantee_rate,
+                         _guard_rent_multiple, _labeled_yen, _list_row)
 
 
 class TestMoney(unittest.TestCase):
@@ -541,6 +543,78 @@ class TestTimestampsUtc(unittest.TestCase):
             if "localtime" in f.read_text(encoding="utf-8"):
                 offenders.append(f.name)
         self.assertEqual(offenders, [])
+
+
+class TestAuditFixes20261026(unittest.TestCase):
+    """2026-10-26 監査所見 F1〜F4 の回帰防止。"""
+
+    def test_thousands_separators(self):
+        # F4: 読点・空白の桁区切りを全経路で読めること
+        self.assertEqual(to_yen("10、000円"), 10000)
+        self.assertEqual(to_yen("10 000円"), 10000)
+        self.assertEqual(money_pair("10、000円 66000円"), (10000, 66000))
+        self.assertEqual(_find_yen("更新料10、000円/年", r"更新料"), 10000)
+
+    def test_guard_rent_multiple(self):
+        # F2: 家賃12ヶ月分超は誤記として落とす（詳細・一覧共通）
+        self.assertIsNone(_guard_rent_multiple(4356000000, 66000))
+        self.assertEqual(_guard_rent_multiple(200000, 85000), 200000)
+        self.assertIsNone(_guard_rent_multiple(None, 66000))
+        self.assertEqual(_guard_rent_multiple(100000, None), 100000)
+
+    def test_list_row_giant_shikikin(self):
+        # F2: 一覧カセットの「敷金: 435600万円」が素通ししないこと
+        row = BeautifulSoup(
+            "<tr><td><a href='/chintai/jnc_000000000001/'>x</a></td>"
+            "<td></td><td>7階</td><td>6.6万円 7000円</td>"
+            "<td>435600万円 66000円</td><td>1K 25.5m2</td></tr>",
+            "html.parser").find("tr")
+        base = {"name": "x", "address": "y", "age_years": 10, "floors": 5,
+                "stations": [], "nearest": {"name": None, "walk": None}}
+        r = _list_row(row, base)
+        self.assertEqual(r["rent_yen"], 66000)
+        self.assertIsNone(r["shikikin_yen"])
+        self.assertEqual(r["reikin_yen"], 66000)
+
+    def test_guarantee_first_fixed_amount(self):
+        # F3: 固定額の明記が月額率の誤認より優先されること
+        self.assertEqual(
+            _guarantee_first_yen(
+                "保証会社利用必 初回保証料:10000円、以降は月額賃料の1%/毎月",
+                63000),
+            10000)
+
+    def test_guarantee_first_rates(self):
+        # F3: 率のみの場合は従来どおり換算されること
+        self.assertEqual(
+            _guarantee_first_yen("日本セーフティー利用必 総賃料の50%", 69000),
+            34500)
+        self.assertEqual(
+            _guarantee_first_yen(
+                "初回保証委託料:連帯保証人なし30%(※下限15,000円)", 90000),
+            27000)
+
+    def test_guarantee_rate_ignores_monthly(self):
+        self.assertIsNone(_guarantee_rate("以降は月額賃料の1%/毎月"))
+
+    def test_guarantee_renew_tiered(self):
+        # F3: 段階制は閾値でなく賃料が属する段の金額を読むこと
+        text = "更新料:15万円未満10,000円/年 15万円以上14,000円/年"
+        self.assertEqual(_labeled_yen(text, r"更新料", 90000), 10000)
+        self.assertEqual(_labeled_yen(text, r"更新料", 160000), 14000)
+
+    def test_guarantee_renew_known_good(self):
+        # F3: 既知の正常値が壊れないこと（比率表記・高額の正当な更新料）
+        self.assertEqual(
+            _labeled_yen("更新料 新賃料1.00ヶ月分", r"更新料", 82000), 82000)
+        self.assertEqual(
+            _labeled_yen("更新料 114000円", r"更新料", 90000), 114000)
+
+    def test_guarantee_renew_annual_label(self):
+        # F3: 「1年更新:10 000円」型（空白区切り含む）
+        self.assertEqual(
+            _labeled_yen("1年更新:10 000円 その他のプラン有", r"年更新", 81000),
+            10000)
 
 
 if __name__ == "__main__":
