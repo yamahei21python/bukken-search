@@ -22,7 +22,9 @@ DB = Path(__file__).parent / "bukken.db"
 COST_COLS = ["key_money_yen", "deposit_yen", "agency_yen",
              "guarantee_first_yen", "guarantee_renew_yen", "insurance_yen",
              "key_exchange_yen", "cleaning_yen", "support_yen",
-             "water_fixed_yen", "renewal_fee_yen", "free_rent_months"]
+             "support_monthly_yen",
+             "water_fixed_yen", "renewal_fee_yen", "renewal_admin_fee_yen",
+             "free_rent_months"]
 
 
 def audit(db_path, max_total=100000, walk_max=10, stale_days=7):
@@ -123,6 +125,37 @@ def audit(db_path, max_total=100000, walk_max=10, stale_days=7):
     out["total_over_cap"] = one(
         "SELECT COUNT(*) FROM listings"
         " WHERE rent_yen + admin_yen > ?", (max_total,))
+
+    # --- シャワー候補（手動確認バケット） ---
+    # tub_status が unknown のままの unit のうち、設備文にシャワー
+    # 設備の言及があり湯船の証拠が無いもの。判定は変えず、目視で
+    # 確認すべき候補として列挙する。
+    from models import is_shower_candidate
+    cand = {}
+    for r in rows(
+            "SELECT u.id unit_id, b.name building, l.url, p.equipment"
+            " FROM units u JOIN listings l ON l.unit_id = u.id"
+            " JOIN properties p ON p.detail_url = l.url"
+            " JOIN buildings b ON b.id = u.building_id"
+            " WHERE u.tub_status = 'unknown'"
+            " AND p.equipment IS NOT NULL AND p.equipment != ''"):
+        if r["unit_id"] in cand:
+            continue
+        if is_shower_candidate(r["equipment"]):
+            cand[r["unit_id"]] = {"unit_id": r["unit_id"],
+                                   "building": r["building"],
+                                   "url": r["url"]}
+    out["shower_candidates"] = list(cand.values())
+    out["shower_candidate_count"] = len(cand)
+
+    # --- 管理費の掲載ミス疑い ---
+    # SUUMO 側の入力ミス（管理費が家賃の半分以上）が parser を素通り
+    # して総額を押し上げ、候補から静かに脱落する。値を直すことは
+    # できないため、疑いとして列挙して目視確認に回す。
+    out["admin_suspect"] = rows(
+        "SELECT name, rent_yen, admin_yen, total_yen, detail_url"
+        " FROM properties WHERE rent_yen > 0"
+        " AND admin_yen >= rent_yen * 0.5 ORDER BY admin_yen DESC")
     con.close()
     return out
 
@@ -169,6 +202,15 @@ def main():
     print(f"== stale active (>{a.stale_days}d): {r['stale_active']} ==")
     print(f"rent>{a.max_total}: {r['rent_over_cap']},"
           f" total>{a.max_total}: {r['total_over_cap']}")
+    print(f"== shower candidates (手動確認): "
+          f"{r['shower_candidate_count']} ==")
+    for c in r["shower_candidates"]:
+        print(f"  unit {c['unit_id']} {c['building']} {c['url']}")
+    print(f"== admin suspect (管理費>=家賃の50%、SUUMO掲載ミス疑い): "
+          f"{len(r['admin_suspect'])} ==")
+    for s in r["admin_suspect"]:
+        print(f"  {s['name']} 家賃{s['rent_yen']} 管理費{s['admin_yen']}"
+              f" 総額{s['total_yen']} {s['detail_url']}")
     return 0
 
 
