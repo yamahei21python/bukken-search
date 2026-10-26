@@ -44,7 +44,14 @@ NONREFUND_COLS = ["key_money_yen", "agency_yen", "guarantee_first_yen",
                   "insurance_yen", "key_exchange_yen", "cleaning_yen"]
 
 QUERY = """
-SELECT p.id, p.name, p.station, p.address, p.walk_min, p.age_years,
+SELECT p.id, p.name,
+       COALESCE((SELECT s.name FROM stations s WHERE s.unit_id = u.id
+                 ORDER BY s.walk_min IS NULL, s.walk_min LIMIT 1),
+                p.station) AS station,
+       p.address,
+       COALESCE((SELECT MIN(s.walk_min) FROM stations s
+                 WHERE s.unit_id = u.id), p.walk_min) AS walk_min,
+       p.age_years,
        p.room_floor, p.rent_yen, p.admin_yen, p.total_yen, p.layout,
        COALESCE(u.area_m2, p.area_m2) AS area_m2,
        p.has_bathtub, p.equipment, p.detail_url,
