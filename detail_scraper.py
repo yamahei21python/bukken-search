@@ -243,8 +243,9 @@ def apply_detail(con, lid, uid, url, d):
         "INSERT OR REPLACE INTO costs(listing_id,key_money_yen,deposit_yen,"
         "agency_yen,guarantee_first_yen,guarantee_renew_yen,insurance_yen,"
         "key_exchange_yen,cleaning_yen,support_yen,support_monthly_yen,"
-        "water_fixed_yen,renewal_fee_yen,contract_months,free_rent_months,"
-        "regular_lease,fetched,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
+        "water_fixed_yen,renewal_fee_yen,renewal_admin_fee_yen,"
+        "contract_months,free_rent_months,"
+        "regular_lease,fetched,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
         (lid, d["key_money_yen"], d["deposit_yen"], d.get("agency_yen"),
          d["guarantee_first_yen"], d.get("guarantee_renew_yen"),
          d["insurance_yen"], d["key_exchange_yen"],
@@ -253,7 +254,8 @@ def apply_detail(con, lid, uid, url, d):
          # 契約期間が読めない場合は NULL のままにする。従来は
          # `or 24` で埋めており「本当に2年」と区別できなかった
          # （按分のフォールバックは消費側が持つ）。
-         d["renewal_fee_yen"], d.get("contract_months"),
+         d["renewal_fee_yen"], d.get("renewal_admin_fee_yen"),
+         d.get("contract_months"),
          d["free_rent_months"], d["regular_lease"], note[:500]))
 
 
