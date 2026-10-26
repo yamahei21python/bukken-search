@@ -149,6 +149,10 @@ def apply_detail(con, lid, uid, url, d):
                 " WHERE id=? AND shikikin='None'", (lid,))
     con.execute("UPDATE listings SET reikin=NULL"
                 " WHERE id=? AND reikin='None'", (lid,))
+    # 掲載仲介の帰属（F10）。詳細ページの取扱店舗が取れた場合だけ入れる
+    if d.get("agent"):
+        con.execute("UPDATE listings SET agent=? WHERE id=?",
+                    (d["agent"], lid))
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
                 (status, conf, d.get("direction"), uid))
