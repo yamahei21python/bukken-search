@@ -2,7 +2,8 @@
 import argparse
 import sqlite3
 from pathlib import Path
-from models import effective_monthly, total_2year, score_unit
+from models import (effective_monthly, total_2year, score_unit,
+                    is_shower_candidate)
 DB = Path(__file__).parent / "bukken.db"
 ap = argparse.ArgumentParser()
 ap.add_argument("--max-total", type=int, default=100000)
@@ -11,6 +12,9 @@ ap.add_argument("--walk-max", type=int, default=10)
 ap.add_argument("--allow-unknown-walk", action="store_true",
                 help="徒歩不明を含める(既定は除外)")
 ap.add_argument("--min-area", type=float, default=0)
+ap.add_argument("--shower-only", action="store_true",
+                help="シャワー候補（unknown かつ設備にシャワー言及・"
+                     "湯船証拠なし）だけ表示")
 a = ap.parse_args()
 con = sqlite3.connect(DB)
 con.row_factory = sqlite3.Row
@@ -57,6 +61,10 @@ for r in rows:
                      support_monthly=r["supm"], contract_months=r["cm"],
                      renewal_admin_fee=r["raf"])
     missing = r["walk_min"] is None or not r["ev"]
+    shower = r["tub_status"] == "unknown" \
+        and is_shower_candidate(r["equip"] or "")
+    if a.shower_only and not shower:
+        continue
     sc, reasons = score_unit(dict(total=total, tub_status=r["tub_status"],
                                   walk_min=r["walk_min"], area=r["area"],
                                   floor=r["floor"], equip=r["equip"] or "",
@@ -64,7 +72,7 @@ for r in rows:
                                   missing=missing))
     hits.append((sc, eff, dict(r) | {"total": total, "t2": t2,
                                      "init": init_total, "reasons": reasons,
-                                     "fetched": fetched}))
+                                     "fetched": fetched, "shower": shower}))
 hits.sort(key=lambda x: (x[0], -x[1]), reverse=True)
 print(f"hit: {len(hits)} (*=初期未取得のため2年総額は暫定)")
 for sc, eff, h in hits[:50]:
@@ -72,5 +80,5 @@ for sc, eff, h in hits[:50]:
     init_str = f"初期{h['init']/10000:.1f}万" if fetched else "初期未取得"
     print(f"[{sc}点] 実質{eff/10000:.2f}万 総額{h['total']/10000:.1f}万 "
           f"{init_str} 2年{h['t2']/10000:.0f}万{'*' if not fetched else ''} "
-          f"{h['layout']} {h['area']}m2 歩{h['walk_min']}分 {h['tub_status']} | {h['name']} | {h['url']}")
+          f"{h['layout']} {h['area']}m2 歩{h['walk_min']}分 {h['tub_status']}{' [シャワー候補]' if h.get('shower') else ''} | {h['name']} | {h['url']}")
     print(f"   ev: {(h['ev'] or '')[:100]}")
