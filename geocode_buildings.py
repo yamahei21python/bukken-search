@@ -33,12 +33,25 @@ def lookup(query):
 
 
 def plausible(title, norm_address):
-    """返却地名が問い合わせた住所（区＋町名）を含むかで誤マッチを弾く。"""
-    m = re.match(r"(.+?区)(.+?)(\d+.*)?$", norm_address or "")
+    """返却地名が問い合わせた住所（区/市＋町名）を含むかで誤マッチを弾く。"""
+    m = re.match(r"(.+?[区市])(.+?)(\d+.*)?$", norm_address or "")
     if not m:
         return False
     ward, town = m.group(1), m.group(2)
     return ward in title and (not town or town in title)
+
+
+def query_for(addr):
+    """norm_address から検索クエリを作る。
+
+    大阪市内は normalize で大阪市が削られているため補う。大阪市外の
+    spillover（県名から始まる住所。実例: 兵庫県尼崎市）はそのまま使う。
+    """
+    if re.match(r"^(大阪府|京都府|兵庫県|奈良県|和歌山県|滋賀県)", addr):
+        return addr
+    if addr.startswith("大阪市"):
+        return "大阪府" + addr
+    return CITY_PREFIX + addr
 
 
 def main():
@@ -51,7 +64,7 @@ def main():
     print(f"target addresses: {len(addrs)}")
     hit = miss = 0
     for addr in addrs:
-        query = CITY_PREFIX + addr
+        query = query_for(addr)
         try:
             res = lookup(query)
         except Exception as e:
