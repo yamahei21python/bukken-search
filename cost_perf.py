@@ -60,7 +60,8 @@ SELECT p.id, p.name,
        c.guarantee_first_yen, c.guarantee_renew_yen, c.insurance_yen,
        c.key_exchange_yen, c.cleaning_yen, c.support_yen,
        c.support_monthly_yen,
-       c.water_fixed_yen, c.renewal_fee_yen, c.contract_months,
+       c.water_fixed_yen, c.renewal_fee_yen, c.renewal_admin_fee_yen,
+       c.contract_months,
        c.free_rent_months, u.building_id,
        u.direction AS u_direction, u.corner AS u_corner,
        u.tub_status AS u_tub_status,
@@ -357,6 +358,7 @@ def effective_monthly(r):
             + value_or_zero(r.support_monthly_yen)
             + value_or_zero(r.guarantee_renew_yen) / 12
             + value_or_zero(r.renewal_fee_yen) / months
+            + value_or_zero(r.get("renewal_admin_fee_yen")) / months
             + nonrefund_total(r) / 24)
 
 
@@ -364,6 +366,7 @@ def total_2year(r):
     months = value_or_zero(r.contract_months) or 24
     return (r.total_yen * 24 + nonrefund_total(r) + value_or_zero(r.deposit_yen)
             + value_or_zero(r.renewal_fee_yen)
+            + value_or_zero(r.get("renewal_admin_fee_yen"))
             + value_or_zero(r.guarantee_renew_yen) * 2
             # サポート費は 一時金 + 月額×契約月数（models と同じ定義）
             + value_or_zero(r.support_yen)

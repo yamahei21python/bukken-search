@@ -28,6 +28,7 @@ _PROPERTY_COLUMNS = [
 # 既存テーブルに列が増えないため、初期化時に不足列だけ足す）
 _COSTS_COLUMNS = [
     ("support_monthly_yen", "INTEGER"),
+    ("renewal_admin_fee_yen", "INTEGER"),
 ]
 
 

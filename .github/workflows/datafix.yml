@@ -22,6 +22,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install deps (parser import for backfills)
+        run: pip install pyyaml beautifulsoup4 lxml
+
       - name: Apply datafix
         run: python3 "${{ inputs.package }}/datafix.py" bukken.db
 

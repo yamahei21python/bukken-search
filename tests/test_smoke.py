@@ -139,6 +139,19 @@ class TestParseDetail(unittest.TestCase):
         d = parse_detail(BeautifulSoup(html, "lxml"))
         self.assertIsNone(d["deposit_yen"])
 
+    def test_renewal_admin_fee(self):
+        # F9: 更新事務手数料は更新料と別の費目として独立に取る
+        html = self._with_other("更新事務手数料11000円 水道代2750円")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertEqual(d["renewal_admin_fee_yen"], 11000)
+        self.assertEqual(d["water_fixed_yen"], 2750)
+
+    def test_renewal_admin_fee_man_en(self):
+        # F9: 万円表記（1.199万円 = 11,990円）も取る
+        html = self._with_other("更新事務手数料(更新時)1.199万円")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertEqual(d["renewal_admin_fee_yen"], 11990)
+
     def test_support_glued_number_guard(self):
         # 商品名末尾の数字と金額の連結誤読（241.65万円）は合計超過で捨てる
         html = self._with_other(
@@ -410,6 +423,71 @@ class TestSavePreservesDetail(unittest.TestCase):
         con.close()
         self.assertIsNone(shiki)
         self.assertIsNone(rei)
+
+
+class TestRenewalAdminFeeF9(unittest.TestCase):
+    """F9: 更新事務手数料カラムの消費側（models）と保存往復。"""
+
+    def test_models_include_admin_fee(self):
+        from models import effective_monthly, total_2year
+        base_e = effective_monthly(80000, 5000, contract_months=24)
+        with_e = effective_monthly(80000, 5000, contract_months=24,
+                                   renewal_admin_fee=24000)
+        self.assertEqual(with_e - base_e, 1000)
+        base_t = total_2year(80000, 5000)
+        with_t = total_2year(80000, 5000, renewal_admin_fee=11000)
+        self.assertEqual(with_t - base_t, 11000)
+
+    def test_apply_detail_roundtrip(self):
+        import db as db_mod
+        import scraper
+        from detail_scraper import apply_detail
+        tmp = Path(__file__).parent / "_tmp_test_f9.db"
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(tmp) + suf)
+            if p.exists():
+                p.unlink()
+        orig = db_mod.DB
+        db_mod.DB = tmp
+        try:
+            db_mod.initialize_db()
+            row = {"name": "F9テスト", "address": "大阪市西区立売堀3",
+                   "age_years": 10, "floors": 5, "structure": "鉄筋系",
+                   "area_m2": 25.0, "layout": "1K", "floor": 3,
+                   "direction": None, "rent_yen": 80000, "admin_yen": 5000,
+                   "shikikin_yen": None, "reikin_yen": None,
+                   "url": "https://suumo.jp/chintai/jnc_f9a/",
+                   "stations": [], "nearest": {"line": "地下鉄中央線",
+                                               "name": "阿波座", "walk": 5}}
+            scraper.save([row])
+            con = db_mod.connect_db()
+            lid, uid = con.execute("SELECT id, unit_id FROM listings").fetchone()
+            d = {"rent_yen": 80000, "admin_yen": 5000, "deposit_yen": None,
+                 "key_money_yen": None, "hoshoukin_yen": None,
+                 "shoukyaku_yen": None, "insurance_yen": None,
+                 "key_exchange_yen": None, "cleaning_yen": None,
+                 "support_yen": None, "water_fixed_yen": None,
+                 "guarantee_first_yen": None, "guarantee_renew_yen": None,
+                 "agency_yen": None, "renewal_fee_yen": None,
+                 "renewal_admin_fee_yen": 11000,
+                 "contract_months": 24, "free_rent_months": 0,
+                 "regular_lease": 1, "direction": None,
+                 "structure": "鉄筋系", "floors": 5, "equipment": "",
+                 "note": "更新事務手数料11000円",
+                 "stations": []}
+            apply_detail(con, lid, uid, row["url"], d)
+            con.commit()
+            got = con.execute(
+                "SELECT renewal_admin_fee_yen FROM costs WHERE listing_id=?",
+                (lid,)).fetchone()[0]
+            con.close()
+            self.assertEqual(got, 11000)
+        finally:
+            db_mod.DB = orig
+            for suf in ("", "-wal", "-shm"):
+                p = Path(str(tmp) + suf)
+                if p.exists():
+                    p.unlink()
 
 
 class TestUnitFloorMatchF6(unittest.TestCase):

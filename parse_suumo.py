@@ -670,6 +670,13 @@ def parse_detail(soup):
     # ガード: 倍率が巨大な誤読（新賃料86000.00ヶ月分等）を棄却
     if renewal_fee_yen is not None and rent and renewal_fee_yen > rent * 3:
         renewal_fee_yen = None
+    # 更新事務手数料は更新料とは別の費目（F9 で独立カラム化）。
+    # 従来は保存先がなく、備考に残るだけだった。
+    renewal_admin_fee_yen = _labeled_yen(other, r"更新事務手数料", rent) \
+        or _labeled_yen(contract, r"更新事務手数料", rent)
+    if renewal_admin_fee_yen is not None and rent \
+            and renewal_admin_fee_yen > rent * 3:
+        renewal_admin_fee_yen = None
     admin = price["admin"]
     if rent and admin and admin > rent:
         admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
@@ -732,6 +739,7 @@ def parse_detail(soup):
         "guarantee_renew_yen": guarantee_renew_yen,
         "agency_yen": _agency_yen(g, other, full, price["agency_raw"], rent),
         "renewal_fee_yen": renewal_fee_yen,
+        "renewal_admin_fee_yen": renewal_admin_fee_yen,
         "water_fixed_yen": _find_yen(full, r"水道代"),
         "contract_months": months,
         "regular_lease": 0 if "定期借家" in full else 1,

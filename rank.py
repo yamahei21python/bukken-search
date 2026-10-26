@@ -20,7 +20,7 @@ rows = con.execute(
        (SELECT MIN(walk_min) FROM stations s WHERE s.unit_id=u.id) walk_min,
        c.water_fixed_yen water, c.support_yen sup,
        c.support_monthly_yen supm, c.guarantee_renew_yen gren,
-       c.renewal_fee_yen rf, c.contract_months cm,
+       c.renewal_fee_yen rf, c.renewal_admin_fee_yen raf, c.contract_months cm,
        c.key_money_yen km, c.deposit_yen dep, c.agency_yen ag,
        c.guarantee_first_yen gf, c.insurance_yen ins, c.key_exchange_yen kx,
        c.cleaning_yen cl, c.free_rent_months fr, c.fetched fetched, l.url,
@@ -50,10 +50,12 @@ for r in rows:
     fetched = r["fetched"] if "fetched" in r.keys() else 0
     eff = effective_monthly(r["rent"], r["admin"], r["water"], 0,
                             r["gren"], r["rf"], r["cm"] or 24, nonrefund,
-                            support_monthly=r["supm"])
+                            support_monthly=r["supm"],
+                            renewal_admin_fee=r["raf"])
     t2 = total_2year(r["rent"], r["admin"], init_total, r["rf"],
                      r["gren"], r["fr"], support_once=r["sup"],
-                     support_monthly=r["supm"], contract_months=r["cm"])
+                     support_monthly=r["supm"], contract_months=r["cm"],
+                     renewal_admin_fee=r["raf"])
     missing = r["walk_min"] is None or not r["ev"]
     sc, reasons = score_unit(dict(total=total, tub_status=r["tub_status"],
                                   walk_min=r["walk_min"], area=r["area"],

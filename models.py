@@ -7,29 +7,34 @@ CFG = yaml.safe_load(open(Path(__file__).parent / "config.yaml"))
 def effective_monthly(rent, admin=0, water=0, support=0,
                       guarantee_renew=0, renewal_fee=0,
                       contract_months=24, nonrefund_init=0,
-                      support_monthly=0):
+                      support_monthly=0, renewal_admin_fee=0):
     """実質月額。
 
     support（一時金）は月額に混ぜない。月額型サポートは
     support_monthly のみを加算する（従来は一時金 46,200円が
     毎月 +46,200円に化けていた）。contract_months が不明
     （NULL）のときは 24ヶ月とみなして更新料を按分する。
+    更新事務手数料は更新料と同時に発生するため同じ按分で加える。
     """
     return ((rent or 0) + (admin or 0) + (water or 0)
             + (support_monthly or 0)
             + (guarantee_renew or 0) / 12
             + (renewal_fee or 0) / (contract_months or 24)
+            + (renewal_admin_fee or 0) / (contract_months or 24)
             + (nonrefund_init or 0) / 24)
 
 def total_2year(rent, admin=0, init_total=0, renewal_fee=0,
                 guarantee_renew=0, free_months=0,
-                support_once=0, support_monthly=0, contract_months=None):
+                support_once=0, support_monthly=0, contract_months=None,
+                renewal_admin_fee=0):
     """2年総額。サポート費は 一時金 + 月額×契約月数 で計上する
     （従来は完全に無視され、月額990円の物件で 23,760円脱落した）。
-    contract_months 不明時は 24ヶ月で計算する。"""
+    contract_months 不明時は 24ヶ月で計算する。
+    更新事務手数料は更新料と同じく2年内に1回発生するものとして加える。"""
     months = contract_months or 24
     return ((rent or 0) + (admin or 0)) * 24 + (init_total or 0) \
-        + (renewal_fee or 0) + (guarantee_renew or 0) * 2 \
+        + (renewal_fee or 0) + (renewal_admin_fee or 0) \
+        + (guarantee_renew or 0) * 2 \
         + (support_once or 0) + (support_monthly or 0) * months \
         - (rent or 0) * (free_months or 0)
 
