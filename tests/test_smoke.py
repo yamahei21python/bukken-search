@@ -152,6 +152,23 @@ class TestParseDetail(unittest.TestCase):
         d = parse_detail(BeautifulSoup(html, "lxml"))
         self.assertEqual(d["renewal_admin_fee_yen"], 11990)
 
+    def test_agent_extracted(self):
+        # F10: 取扱店舗名を listings.agent 用に取る（表示のまま保持）
+        html = ("<html><body><div class='property_view_note-info'>\n"
+                "8.5万円\n管理費: 5000円\n</div>"
+                "<div class='viewform_advance_shop'>"
+                "<div class='viewform_advance_shop-name'>"
+                "ミニミニFC阿波座駅前店(株)マスト</div></div>"
+                "</body></html>")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertEqual(d["agent"], "ミニミニFC阿波座駅前店(株)マスト")
+
+    def test_agent_absent_is_none(self):
+        html = ("<html><body><div class='property_view_note-info'>\n"
+                "8.5万円\n管理費: 5000円\n</div></body></html>")
+        d = parse_detail(BeautifulSoup(html, "lxml"))
+        self.assertIsNone(d["agent"])
+
     def test_support_glued_number_guard(self):
         # 商品名末尾の数字と金額の連結誤読（241.65万円）は合計超過で捨てる
         html = self._with_other(
@@ -475,13 +492,18 @@ class TestRenewalAdminFeeF9(unittest.TestCase):
                  "structure": "鉄筋系", "floors": 5, "equipment": "",
                  "note": "更新事務手数料11000円",
                  "stations": []}
+            d["agent"] = "テスト不動産(株)テスト"
             apply_detail(con, lid, uid, row["url"], d)
             con.commit()
             got = con.execute(
                 "SELECT renewal_admin_fee_yen FROM costs WHERE listing_id=?",
                 (lid,)).fetchone()[0]
+            agent = con.execute(
+                "SELECT agent FROM listings WHERE id=?", (lid,)).fetchone()[0]
             con.close()
             self.assertEqual(got, 11000)
+            # F10: agent も同じ適用で listings に入る
+            self.assertEqual(agent, "テスト不動産(株)テスト")
         finally:
             db_mod.DB = orig
             for suf in ("", "-wal", "-shm"):
