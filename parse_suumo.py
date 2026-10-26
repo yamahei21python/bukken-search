@@ -116,6 +116,27 @@ def strip_building_name(name: str | None, fallback: str | None = None) -> str:
     return clean or (original if fallback is None else fallback)
 
 
+_READING_CHARS = set("ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすず"
+                     "せぜそぞただちぢつづてでとどなにぬねのはばぱひびぴ"
+                     "ふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろ"
+                     "ゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴ"
+                     "サザシジスズセゼソゾタダチヂツヅテデトドナニヌネノ"
+                     "ハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨ"
+                     "ラリルレロヮワヰヱヲンヴヵヶー・")
+
+
+def _strip_reading_parens(s: str) -> str:
+    """括弧内が読み表記（かな・カナ・長音・中点・空白のみ）の場合だけ
+    括弧ごと落とす。「南館」「別館」のような意味のある括弧は残す。"""
+    def repl(m):
+        inner = m.group(1)
+        if inner and all(ch in _READING_CHARS or ch.isspace()
+                         for ch in inner):
+            return ""
+        return m.group(0)
+    return re.sub(r"[（(]([^（）()]*)[）)]", repl, s)
+
+
 def normalize_building_name(name: str | None) -> str:
     """建物照合用の表記統一。"""
     if not name:
@@ -123,6 +144,8 @@ def normalize_building_name(name: str | None) -> str:
     clean = nfkc(name).strip()
     if re.match(r"^(地下鉄|JR|京阪|阪急|南海|近鉄)", clean) and "駅" in clean:
         return ""
+    clean = _strip_reading_parens(clean)
+    clean = clean.replace("・", "")
     return re.sub(r"\s+", "", clean).replace("Ⅱ", "II").replace("Ⅲ", "III").lower()
 
 
