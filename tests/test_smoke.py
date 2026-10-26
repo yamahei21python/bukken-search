@@ -285,6 +285,23 @@ class TestStations(unittest.TestCase):
         self.assertEqual([s["name"] for s in st],
                          ["阿波座", "西長堀", "本町"])
 
+    def test_outlier_station_dropped(self):
+        # F7: 最寄りから30分超の駅は同一カセット内の外れ値として落とす
+        from parse_suumo import parse_stations
+        st = parse_stations(
+            "地下鉄中央線/阿波座駅 歩4分 地下鉄千日前線/玉川駅 歩68分"
+            " 地下鉄長堀鶴見緑地線/西長堀駅 歩13分")
+        self.assertEqual([s["name"] for s in st], ["阿波座", "西長堀"])
+
+    def test_far_but_plausible_station_kept(self):
+        # F7: 差が30分以内なら遠い第3駅でも残す
+        from parse_suumo import parse_stations
+        st = parse_stations(
+            "地下鉄中央線/阿波座駅 歩5分 地下鉄四つ橋線/本町駅 歩20分"
+            " 地下鉄御堂筋線/淀屋橋駅 歩33分")
+        self.assertEqual([s["name"] for s in st],
+                         ["阿波座", "本町", "淀屋橋"])
+
     def test_fino_stations(self):
         # 旭区中宮の物件: 物件情報ブロックの3駅だけが正解で、
         # 仲介店舗の駅（四ツ橋・心斎橋・西大橋）を拾わない
@@ -462,6 +479,27 @@ class TestUnitFloorMatchF6(unittest.TestCase):
         scraper.save([self._row("https://suumo.jp/chintai/jnc_f6h/", 3)])
         scraper.save([self._row("https://suumo.jp/chintai/jnc_f6i/", 5)])
         self.assertEqual(sorted(self._units()), [3, 5])
+
+    def test_cross_cassette_outlier_station_not_merged(self):
+        # F7: 別カセット由来の外れ値駅（最寄り+30分超）を unit に混ぜない
+        import db as db_mod
+        import scraper
+        row_a = self._row("https://suumo.jp/chintai/jnc_f7a/", 3)
+        row_a["stations"] = [{"line": "地下鉄中央線", "name": "阿波座",
+                              "walk": 4}]
+        row_a["nearest"] = {"line": "地下鉄中央線", "name": "阿波座",
+                            "walk": 4}
+        row_b = self._row("https://suumo.jp/chintai/jnc_f7b/", 3)
+        row_b["stations"] = [{"line": "地下鉄千日前線", "name": "玉川",
+                              "walk": 68}]
+        row_b["nearest"] = {"line": "地下鉄千日前線", "name": "玉川",
+                            "walk": 68}
+        scraper.save([row_a])
+        scraper.save([row_b])
+        con = db_mod.connect_db()
+        names = [r[0] for r in con.execute("SELECT name FROM stations")]
+        con.close()
+        self.assertEqual(names, ["阿波座"])
 
 
 class TestRound6Db(unittest.TestCase):

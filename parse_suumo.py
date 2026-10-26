@@ -178,6 +178,14 @@ def parse_stations(text):
         out.append({"line": line, "name": name, "walk": walk})
         if len(out) >= 3:
             break
+    # F7: 最寄りから30分超も離れた駅は同一カセット内の外れ値として落とす
+    # （仲介店舗側の駅や説明名由来の混入。実例: 都島区の物件に玉川68分）。
+    # walk 不明の駅は判定材料がないため残す。
+    walks = [s["walk"] for s in out if s["walk"] is not None]
+    if len(walks) >= 2:
+        nearest_walk = min(walks)
+        out = [s for s in out
+               if s["walk"] is None or s["walk"] <= nearest_walk + 30]
     return out
 
 
