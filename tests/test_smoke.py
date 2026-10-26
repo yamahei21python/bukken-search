@@ -345,6 +345,71 @@ class TestStations(unittest.TestCase):
             [("千林大宮", 11), ("城北公園通", 14), ("森小路", 18)])
 
 
+class TestShowerCandidate(unittest.TestCase):
+    """見送り解消: シャワー候補（手動確認バケット）の述語。"""
+
+    def test_shower_room_without_tub_evidence(self):
+        from models import is_shower_candidate
+        self.assertTrue(is_shower_candidate("シャワールーム、オートロック"))
+        self.assertTrue(is_shower_candidate("シャワーブース、フローリング"))
+
+    def test_tub_evidence_excludes(self):
+        from models import is_shower_candidate
+        self.assertFalse(is_shower_candidate("シャワールーム、ユニットバス"))
+        self.assertFalse(is_shower_candidate("シャワールーム、浴室乾燥"))
+
+    def test_confirmed_no_tub_phrase_excludes(self):
+        # 「シャワールームのみ」は確定表現なので候補ではなく確定側
+        from models import is_shower_candidate
+        self.assertFalse(is_shower_candidate("シャワールームのみ、オートロック"))
+
+    def test_washstand_shower_is_not_a_candidate(self):
+        # シャワー付洗面台は除外キーワード（洗面台のシャワー）
+        from models import is_shower_candidate
+        self.assertFalse(is_shower_candidate("シャワー付洗面台、オートロック"))
+
+    def test_no_shower_mention(self):
+        from models import is_shower_candidate
+        self.assertFalse(is_shower_candidate("オートロック、宅配ボックス"))
+        self.assertFalse(is_shower_candidate(""))
+        self.assertFalse(is_shower_candidate(None))
+
+
+class TestDropDeadColumn(unittest.TestCase):
+    """見送り解消: evidence.photo_url（死にカラム）の撤去移行。"""
+
+    def test_initialize_drops_photo_url(self):
+        import sqlite3
+        import db as db_mod
+        tmp = Path(__file__).parent / "_tmp_test_drop.db"
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(tmp) + suf)
+            if p.exists():
+                p.unlink()
+        con = sqlite3.connect(tmp)
+        con.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY,"
+                    " unit_id INTEGER, tub_status TEXT, quote TEXT,"
+                    " url TEXT, photo_url TEXT, method TEXT,"
+                    " confidence REAL,"
+                    " checked_at TEXT DEFAULT (datetime('now')))")
+        con.commit()
+        con.close()
+        orig = db_mod.DB
+        db_mod.DB = tmp
+        try:
+            db_mod.initialize_db()
+        finally:
+            db_mod.DB = orig
+        con = sqlite3.connect(tmp)
+        cols = [r[1] for r in con.execute("PRAGMA table_info(evidence)")]
+        con.close()
+        for suf in ("", "-wal", "-shm"):
+            p = Path(str(tmp) + suf)
+            if p.exists():
+                p.unlink()
+        self.assertNotIn("photo_url", cols)
+
+
 class TestScore(unittest.TestCase):
     def test_score_uses_config(self):
         u = dict(total=80000, tub_status="likely_no_tub", walk_min=7,
