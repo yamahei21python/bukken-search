@@ -597,6 +597,62 @@ class TestAuditFixes20261026(unittest.TestCase):
     def test_guarantee_rate_ignores_monthly(self):
         self.assertIsNone(_guarantee_rate("以降は月額賃料の1%/毎月"))
 
+    def test_guarantee_first_bare_initial_fixed(self):
+        # F3b: 「初回:33,000円」の裸ラベル。月額率への誤認を防ぐ
+        self.assertEqual(
+            _guarantee_first_yen(
+                "保証会社利用必 初回:33000円 月額保証料:総賃料の2%/月",
+                90000),
+            33000)
+
+    def test_guarantee_first_hosho_label_fixed(self):
+        # F3b: 「保証料:35000円」の素のラベル
+        self.assertEqual(
+            _guarantee_first_yen(
+                "保証会社利用必 保証料:35000円 機関保証", 91000),
+            35000)
+
+    def test_guarantee_first_move_in_fixed(self):
+        # F3b: 「◯円/入居時」型。後段の月額率を拾わないこと
+        self.assertEqual(
+            _guarantee_first_yen(
+                "保証会社利用必 保証人代行サービス保証料・"
+                "家賃集金サービス手数料:10,000円/入居時、"
+                "以降は月額賃料の1%/毎月(入居期間中)、他プラン有",
+                63000),
+            10000)
+
+    def test_guarantee_first_transaction_fee_is_not_guarantee(self):
+        # F3b: 初回/契約時の事務手数料は保証料ではない。月額率も
+        # 初回率に化かさない
+        self.assertIsNone(
+            _guarantee_first_yen(
+                "保証会社利用必 【個人契約】 "
+                "初回契約事務手数料:33,000円(税込)、"
+                "月額保証料:賃料等の2%、"
+                "保証会社:積水ハウスシャーメゾンパートナーズ",
+                76000))
+        self.assertIsNone(
+            _guarantee_first_yen(
+                "保証会社利用必 契約時事務手数料:33,000円、"
+                "月額保証料:総賃料の2%",
+                82000))
+
+    def test_guarantee_first_monthly_fixed_not_first(self):
+        # F3b: 月額の固定額は初回保証料ではない
+        self.assertIsNone(
+            _guarantee_first_yen("保証会社利用必 保証料:1,000円/月", 80000))
+
+    def test_guarantee_first_bracket_initial_rate(self):
+        # F3b: 「[初回]総賃料50%」は率換算のまま。後段の更新料
+        # 20,000円を初回固定額と誤認しないこと
+        self.assertEqual(
+            _guarantee_first_yen(
+                "保証会社利用必 [初回]総賃料50% "
+                "更新料[年]20,000円 [月額]総賃料1%",
+                64600),
+            32300)
+
     def test_guarantee_renew_tiered(self):
         # F3: 段階制は閾値でなく賃料が属する段の金額を読むこと
         text = "更新料:15万円未満10,000円/年 15万円以上14,000円/年"

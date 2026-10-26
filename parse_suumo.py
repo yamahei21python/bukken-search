@@ -317,20 +317,67 @@ def _labeled_yen(text, label_re, rent, window=40):
 
 def _guarantee_rate(text):
     t = nfkc(text or "")
-    for pat in (r"初回[^0-9]{0,10}(\d{1,3})\s*[%％]",
-                r"総賃料の(\d{1,3})\s*[%％]"):
-        m = re.search(pat, t)
-        if m:
-            return int(m.group(1))
-    # 「賃料の◯%」は初回率のこともあるが、「月額賃料の1%/毎月」の
-    # ような月額保証料の率を初回率と誤認しないよう、月額文脈の
-    # マッチは採用しない（実例: 初回保証料10,000円の物件が ¥630 化）
-    for m in re.finditer(r"賃料[等]?[^0-9]{0,8}(\d{1,3})\s*[%％]", t):
-        if "月額" in t[max(0, m.start() - 6):m.start()]:
+    m = re.search(r"初回[^0-9]{0,10}(\d{1,3})\s*[%％]", t)
+    if m:
+        return int(m.group(1))
+    # 「総賃料の◯%」も、「月額保証料:総賃料の2%」のような月額文脈の
+    # マッチは初回率と誤認しない（実例: 事務手数料33,000円+月額2%の
+    # 物件が ¥1,640 化した）
+    for m in re.finditer(r"総賃料の(\d{1,3})\s*[%％]", t):
+        if "月額" in t[max(0, m.start() - 8):m.start()]:
+            continue
+        if "月次" in t[max(0, m.start() - 8):m.start()]:
             continue
         if "毎月" in t[m.end():m.end() + 6]:
             continue
         return int(m.group(1))
+    # 「賃料の◯%」は初回率のこともあるが、「月額賃料の1%/毎月」の
+    # ような月額保証料の率を初回率と誤認しないよう、月額文脈の
+    # マッチは採用しない（実例: 初回保証料10,000円の物件が ¥630 化）
+    for m in re.finditer(r"賃料[等]?[^0-9]{0,8}(\d{1,3})\s*[%％]", t):
+        if "月額" in t[max(0, m.start() - 8):m.start()]:
+            continue
+        if "毎月" in t[m.end():m.end() + 6]:
+            continue
+        return int(m.group(1))
+    return None
+
+
+def _initial_fixed_yen(text):
+    """「初回:33,000円」型の固定額。ラベルの後に率より先に金額が
+    来ている場合だけ採用する。「初回契約事務手数料」のような
+    事務手数料は保証料ではないので、そのマッチは読み飛ばす。"""
+    t = nfkc(text or "")
+    for m in re.finditer(r"初回", t):
+        seg = t[m.end(): m.end() + 30]
+        yen = re.search(r"([\d,]+)\s*円", seg)
+        if not yen:
+            continue
+        if "事務手数料" in seg[:yen.start()]:
+            continue
+        pct = re.search(r"\d+\s*[%％]", seg)
+        if pct and pct.start() < yen.start():
+            continue
+        return int(yen.group(1).replace(",", ""))
+    return None
+
+
+def _hosho_fixed_yen(text):
+    """「保証料:35000円」型と「◯円/入居時」型の固定額。
+    保証料ラベルの直後に金額が続く場合だけを採用し、月額の
+    固定額（◯円/月）は初回とみなさない。"""
+    t = nfkc(text or "")
+    for m in re.finditer(r"保証料", t):
+        seg = t[m.end(): m.end() + 20]
+        yen = re.match(r"[：:・\s]*([\d,]+)\s*円", seg)
+        if not yen:
+            continue
+        if re.match(r"\s*[／/]\s*(毎月|月)", seg[yen.end():]):
+            continue
+        return int(yen.group(1).replace(",", ""))
+    m = re.search(r"([\d,]+)\s*円\s*[／/]\s*入居時", t)
+    if m and "保証" in t[:m.start()]:
+        return int(m.group(1).replace(",", ""))
     return None
 
 
@@ -340,6 +387,12 @@ def _guarantee_first_yen(text, rent):
     従来は率が無いと NULL 固定で、固定額のみの物件を取りこぼし、
     率があると月額率の誤認で実額と乖離していた。"""
     v = _labeled_yen(text or "", r"初回保証委託料|初回保証料", rent)
+    if v is not None:
+        return v
+    v = _initial_fixed_yen(text)
+    if v is not None:
+        return v
+    v = _hosho_fixed_yen(text)
     if v is not None:
         return v
     rate = _guarantee_rate(text)
