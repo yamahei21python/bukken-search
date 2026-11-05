@@ -1,0 +1,14 @@
+{
+  "name": "sara-profile",
+  "version": "1.0.0",
+  "description": "さら（NIKE★CHOICE高松）プロフィールまとめ",
+  "type": "module",
+  "scripts": {
+    "dev": "vite preview",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vite": "^5.2.0"
+  }
+}
