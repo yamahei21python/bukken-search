@@ -68,7 +68,8 @@ SELECT p.id, p.name,
        u.tub_confidence AS u_tub_confidence,
        b.structure AS b_structure, b.floors AS b_floors,
        b.autolock AS b_autolock, b.elevator AS b_elevator,
-       b.delivery_box AS b_delivery_box
+       b.delivery_box AS b_delivery_box,
+       b.lat AS b_lat, b.lon AS b_lon
 FROM properties p
 JOIN listings l ON l.url = p.detail_url
 LEFT JOIN units u ON u.id = l.unit_id
