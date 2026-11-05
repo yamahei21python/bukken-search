@@ -31,5 +31,7 @@ jobs:
           pip install ruff==0.17.3
           ruff check .
 
-      - name: Run smoke tests
-        run: python -m unittest tests.test_smoke -v
+      # discover で tests/ 配下 (test_smoke + test_fixtures) を実行する。
+      # test_fixtures は repo 同梱の実ページ HTML を食わせる回帰テスト。
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
