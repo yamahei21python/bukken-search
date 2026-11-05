@@ -246,7 +246,7 @@ def _list_row(row, base):
     ml = _LAYOUT_RE.search(cell(5))
     if ml:
         layout = ml.group(1)
-    ma = re.search(r"([\d.]+)\s*m", cell(5))
+    ma = re.search(r"(\d+(?:\.\d+)?)\s*m", cell(5))
     area = float(ma.group(1)) if ma else None
 
     durl = None
@@ -323,10 +323,10 @@ def _first_value(seg, rent):
     if am:
         best = (am.start(), to_yen(am.group(0)))
     if rent:
-        rm = re.search(r"([\d.]+)\s*(?:ヶ月|か月|カ月|ヵ月)(?:分)?", seg)
+        rm = re.search(r"(\d+(?:\.\d+)?)\s*(?:ヶ月|か月|カ月|ヵ月)(?:分)?", seg)
         if rm and (best is None or rm.start() < best[0]):
             best = (rm.start(), int(rent * float(rm.group(1))))
-        pm = re.search(r"([\d.]+)\s*[%％]", seg)
+        pm = re.search(r"(\d+(?:\.\d+)?)\s*[%％]", seg)
         if pm and (best is None or pm.start() < best[0]):
             best = (pm.start(), int(rent * float(pm.group(1)) / 100))
     return best[1] if best else None
@@ -451,10 +451,10 @@ def _yen_or_ratio(text, rent):
         return round(float(m.group(1).replace(",", "")))
     if not rent:
         return None
-    m = re.search(r"([\d.]+)\s*(?:ヶ月|か月|カ月|ヵ月)(?:分)?", t)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:ヶ月|か月|カ月|ヵ月)(?:分)?", t)
     if m:
         return int(rent * float(m.group(1)))
-    m = re.search(r"([\d.]+)\s*[%％]", t)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*[%％]", t)
     if m:
         return int(rent * float(m.group(1)) / 100)
     return None
@@ -730,7 +730,7 @@ def parse_detail(soup):
         # SUUMO の「-」は向き未公表のプレースホルダ。値として保存
         # すると実値の上書きや誤集計の元になるため NULL に倒す
         direction = None
-    area_m = re.search(r"([\d.]+)", acc.get("専有面積") or "")
+    area_m = re.search(r"(\d+(?:\.\d+)?)", acc.get("専有面積") or "")
 
     return {
         "rent_yen": rent,
