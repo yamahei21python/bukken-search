@@ -1,22 +1,24 @@
 """実質費用・湯船5段階判定・100点スコア"""
-import unicodedata
 from pathlib import Path
 
 import yaml
 
+from parse_suumo import nfkc
+
 CFG = yaml.safe_load(
     (Path(__file__).parent / "config.yaml").read_text())
 
-def effective_monthly(rent, admin=0, water=0, support=0,
+
+def effective_monthly(rent, admin=0, water=0,
                       guarantee_renew=0, renewal_fee=0,
                       contract_months=24, nonrefund_init=0,
                       support_monthly=0, renewal_admin_fee=0):
     """実質月額。
 
-    support（一時金）は月額に混ぜない。月額型サポートは
-    support_monthly のみを加算する（従来は一時金 46,200円が
-    毎月 +46,200円に化けていた）。contract_months が不明
-    （NULL）のときは 24ヶ月とみなして更新料を按分する。
+    入居時一時金（サポート一時金等）は月額に混ぜない。月額型
+    サポートは support_monthly のみを加算する（従来は一時金
+    46,200円が毎月 +46,200円に化けていた）。contract_months が
+    不明（NULL）のときは 24ヶ月とみなして更新料を按分する。
     更新事務手数料は更新料と同時に発生するため同じ按分で加える。
     """
     return ((rent or 0) + (admin or 0) + (water or 0)
@@ -42,10 +44,6 @@ def total_2year(rent, admin=0, init_total=0, renewal_fee=0,
         - (rent or 0) * (free_months or 0)
 
 EXC = CFG["tub"]["exclude_keywords"]
-
-def nfkc(s):
-    return unicodedata.normalize("NFKC", s or "").replace("\xa0", " ")
-
 
 def _strip_excluded(t):
     for k in EXC:

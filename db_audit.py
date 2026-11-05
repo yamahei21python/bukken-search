@@ -18,7 +18,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
-DB = Path(__file__).parent / "bukken.db"
+from db import DB
+
 COST_COLS = ["key_money_yen", "deposit_yen", "agency_yen",
              "guarantee_first_yen", "guarantee_renew_yen", "insurance_yen",
              "key_exchange_yen", "cleaning_yen", "support_yen",

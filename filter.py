@@ -1,9 +1,9 @@
 """選別クエリ: python3 filter.py --max-rent 70000 --no-bathtub --walk-max 10 --sort total"""
 import argparse
 import sqlite3
-from pathlib import Path
 
-DB = Path(__file__).parent / "bukken.db"
+from db import DB
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--max-rent", type=int, default=70000)
 ap.add_argument("--include-admin", action="store_true", help="管理費込みで判定")

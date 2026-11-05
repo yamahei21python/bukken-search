@@ -11,8 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import app_data
-
-DB = Path(__file__).parent.parent / "bukken.db"
+from db import DB
 
 REQUIRED_COLS = [
     "name", "station", "walk_min", "layout", "area_m2", "room_floor",

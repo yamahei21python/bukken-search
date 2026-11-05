@@ -5,14 +5,12 @@ UI の配線のみを行う。公正価値は cost_perf のヘドニックモデ
 (ridge) をフィルタ条件単位でキャッシュして使う。
 """
 import sqlite3
-from pathlib import Path
 
 import streamlit as st
 
 import app_data
+from db import DB
 from models import is_shower_candidate
-
-DB = Path(__file__).parent / "bukken.db"
 
 st.set_page_config(layout="wide")
 st.title("阿波座 賃貸選別")

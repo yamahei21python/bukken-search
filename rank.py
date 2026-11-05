@@ -1,11 +1,10 @@
 """選別CLI: 実質月額・2年総額・スコア付きランキング"""
 import argparse
 import sqlite3
-from pathlib import Path
 
+from db import DB
 from models import effective_monthly, is_shower_candidate, score_unit, total_2year
 
-DB = Path(__file__).parent / "bukken.db"
 ap = argparse.ArgumentParser()
 ap.add_argument("--max-total", type=int, default=100000)
 ap.add_argument("--tub", nargs="*", default=["confirmed_no_tub", "likely_no_tub", "unknown"])
@@ -53,12 +52,15 @@ for r in rows:
         + (r["ins"] or 0) + (r["kx"] or 0) + (r["cl"] or 0)
     init_total = nonrefund + (r["dep"] or 0)
     fetched = r["fetched"] if "fetched" in r.keys() else 0  # noqa: SIM118
-    eff = effective_monthly(r["rent"], r["admin"], r["water"], 0,
-                            r["gren"], r["rf"], r["cm"] or 24, nonrefund,
+    eff = effective_monthly(r["rent"], r["admin"], r["water"],
+                            guarantee_renew=r["gren"], renewal_fee=r["rf"],
+                            contract_months=r["cm"] or 24,
+                            nonrefund_init=nonrefund,
                             support_monthly=r["supm"],
                             renewal_admin_fee=r["raf"])
-    t2 = total_2year(r["rent"], r["admin"], init_total, r["rf"],
-                     r["gren"], r["fr"], support_once=r["sup"],
+    t2 = total_2year(r["rent"], r["admin"], init_total=init_total,
+                     renewal_fee=r["rf"], guarantee_renew=r["gren"],
+                     free_months=r["fr"], support_once=r["sup"],
                      support_monthly=r["supm"], contract_months=r["cm"],
                      renewal_admin_fee=r["raf"])
     missing = r["walk_min"] is None or not r["ev"]
