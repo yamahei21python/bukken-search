@@ -85,3 +85,28 @@ def equipment_keyword_mask(df, keyword):
     if not keyword:
         return pd.Series(True, index=df.index)
     return df["equipment"].fillna("").str.contains(keyword, regex=False)
+
+
+DISP_COLS = {
+    "name": "建物", "station": "駅", "walk_min": "徒歩", "layout": "間取り",
+    "area_m2": "面積m2", "room_floor": "階", "age_years": "築年",
+    "total_yen": "総額", "fair": "公正価値", "discount": "割安度",
+    "save_yen": "割安額", "eff_monthly": "実質月額", "t2": "2年総額",
+    "u_tub_status": "湯船", "equipment": "設備", "detail_url": "URL",
+}
+DISPLAY_WAN_COLS = ("総額", "公正価値", "割安額", "実質月額", "2年総額")
+
+
+def display_table(out):
+    """UI 一覧表示用に列を選択・整形する。
+
+    列名は日本語へ、割安度は%、金額列は万円単位へ丸めて変換する。
+    """
+    show = out[[c for c in DISP_COLS if c in out.columns]].rename(
+        columns=DISP_COLS)
+    if "割安度" in show.columns:
+        show["割安度"] = (show["割安度"] * 100).round(1)
+    for c in DISPLAY_WAN_COLS:
+        if c in show.columns:
+            show[c] = (show[c] / 10000).round(2)
+    return show

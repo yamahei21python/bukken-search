@@ -90,6 +90,20 @@ class TestAppData(unittest.TestCase):
         m = app_data.equipment_keyword_mask(self.df, "オートロック")
         self.assertGreater(int(m.sum()), 0)
 
+    def test_display_table_scaling(self):
+        fdf = app_data.apply_filters(self.df)
+        out, _meta = app_data.add_fair_value(fdf)
+        show = app_data.display_table(out.head(20))
+        for col in ("建物", "駅", "総額", "公正価値", "割安度", "実質月額"):
+            self.assertIn(col, show.columns)
+        # 割安度は % 表記へ 100 倍されている (円比 0〜1 → 0〜100)
+        self.assertTrue((show["割安度"] <= 100.0).all())
+        # 金額列は万円単位へ換算されている
+        for _s, raw in zip(show["総額"], out.head(20)["total_yen"],
+                           strict=False):
+            self.assertAlmostEqual(_s, round(raw / 10000, 2), places=2)
+        self.assertTrue((show["総額"] < 30).all())
+
 
 if __name__ == "__main__":
     unittest.main()

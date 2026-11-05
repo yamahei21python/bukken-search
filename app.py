@@ -81,19 +81,7 @@ metric_cols[3].metric("初期費用取得率", f"{fetched.mean():.0%}")
 
 tab_table, tab_map, tab_detail = st.tabs(["一覧", "マップ", "詳細/記録"])
 
-DISP_COLS = {
-    "name": "建物", "station": "駅", "walk_min": "徒歩", "layout": "間取り",
-    "area_m2": "面積m2", "room_floor": "階", "age_years": "築年",
-    "total_yen": "総額", "fair": "公正価値", "discount": "割安度",
-    "save_yen": "割安額", "eff_monthly": "実質月額", "t2": "2年総額",
-    "u_tub_status": "湯船", "equipment": "設備", "detail_url": "URL",
-}
-show = out[[c for c in DISP_COLS if c in out.columns]].rename(
-    columns=DISP_COLS)
-show["割安度"] = (show["割安度"] * 100).round(1)
-for c in ("総額", "公正価値", "割安額", "実質月額", "2年総額"):
-    if c in show.columns:
-        show[c] = (show[c] / 10000).round(2)
+show = app_data.display_table(out)
 
 with tab_table:
     st.dataframe(
