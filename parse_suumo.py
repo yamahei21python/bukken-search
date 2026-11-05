@@ -57,13 +57,13 @@ def to_yen(tok):
         return None
     m = re.search(_NUM + r"\s*万円", t)
     if m:
-        return int(round(float(m.group(1).replace(",", "")) * 10000))
+        return round(float(m.group(1).replace(",", "")) * 10000)
     m = re.search(_NUM + r"\s*円", t)
     if m:
         # 円分岐も小数（"2095.5円"）がありうる。int() 直変換だと
         # ValueError で落ち、詳細側は毒物件化・一覧側は run 全体が
         # 異常終了するため、万円分岐と同じく丸めて受ける。
-        return int(round(float(m.group(1).replace(",", ""))))
+        return round(float(m.group(1).replace(",", "")))
     if any(k in t for k in ("なし", "不要", "無料", "込")):
         return 0
     return None
@@ -94,7 +94,8 @@ def money_pair(cell):
         return vals[0], vals[1]
     found = re.findall(_NUM + r"\s*(?:万円|円)|[-−‐―]", nfkc(cell))
     vals = [to_yen(x) for x in found]
-    return (vals + [None, None])[0], (vals + [None, None])[1]
+    padded = [*vals, None, None]
+    return padded[0], padded[1]
 
 
 def canonical_url(url: str | None) -> str | None:
@@ -444,10 +445,10 @@ def _yen_or_ratio(text, rent):
         return 0
     m = re.search(r"([\d,]+(?:\.\d+)?)\s*万円", t)
     if m:
-        return int(round(float(m.group(1).replace(",", "")) * 10000))
+        return round(float(m.group(1).replace(",", "")) * 10000)
     m = re.search(r"([\d,]+(?:\.\d+)?)\s*円", t)
     if m:
-        return int(round(float(m.group(1).replace(",", ""))))
+        return round(float(m.group(1).replace(",", "")))
     if not rent:
         return None
     m = re.search(r"([\d.]+)\s*(?:ヶ月|か月|カ月|ヵ月)(?:分)?", t)
@@ -602,7 +603,7 @@ def parse_detail(soup):
     if info:
         for line in [x.strip() for x in nfkc(info.get_text("\n")).split("\n")
                      if x.strip()]:
-            if line.startswith("管理費") or line.startswith("共益費"):
+            if line.startswith(("管理費", "共益費")):
                 price["admin"] = to_yen(line.split(":", 1)[-1])
             elif line.startswith(("敷金/礼金", "礼金/敷金")):
                 # 合算表記「敷金/礼金: -/8.5万円」は / の前後で分ける。

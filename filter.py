@@ -1,6 +1,8 @@
 """選別クエリ: python3 filter.py --max-rent 70000 --no-bathtub --walk-max 10 --sort total"""
-import argparse, sqlite3
+import argparse
+import sqlite3
 from pathlib import Path
+
 DB = Path(__file__).parent / "bukken.db"
 ap = argparse.ArgumentParser()
 ap.add_argument("--max-rent", type=int, default=70000)

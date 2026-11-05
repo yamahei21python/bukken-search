@@ -17,10 +17,11 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from models import aggregate_tub_status, judge_tub
 from db import connect_db
+from models import aggregate_tub_status, judge_tub
 from parse_suumo import canonical_url, parse_detail
 from scrape_common import fetch_soup, sleep_with_jitter
+
 _TUB_INT = {"confirmed_no_tub": 0, "likely_no_tub": 0,
             "confirmed_tub": 1, "likely_tub": 1, "unknown": -1}
 

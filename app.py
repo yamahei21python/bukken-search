@@ -1,8 +1,10 @@
 """Streamlit選別画面: 表＋比較＋お気に入り＋除外理由＋メモ＋問合せ/内見＋CSV"""
 import sqlite3
 from pathlib import Path
+
 import pandas as pd
 import streamlit as st
+
 DB = Path(__file__).parent / "bukken.db"
 
 st.title("阿波座 賃貸選別")
@@ -48,11 +50,13 @@ if sel:
         uid = con.execute("SELECT unit_id FROM listings WHERE url=?", (sel,)).fetchone()
         if uid:
             con.execute("INSERT OR REPLACE INTO favorites(unit_id,memo) VALUES(?,?)", (uid[0], memo))
-            con.commit(); st.success("登録")
+            con.commit()
+            st.success("登録")
     q = st.text_input("問い合わせ内容")
     if st.button("問い合わせ記録"):
         uid = con.execute("SELECT unit_id FROM listings WHERE url=?", (sel,)).fetchone()
         if uid:
             con.execute("INSERT INTO contacts(unit_id,question) VALUES(?,?)", (uid[0], q))
-            con.commit(); st.success("記録")
+            con.commit()
+            st.success("記録")
 con.close()

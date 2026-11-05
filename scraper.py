@@ -13,6 +13,7 @@
   python3 scraper.py --list-html path/to/list.html     # 保存済みHTMLを解析(オフライン)
 """
 import argparse
+import contextlib
 import sqlite3
 from pathlib import Path
 
@@ -24,7 +25,8 @@ from parse_suumo import normalize_address, normalize_building_name, parse_list
 from scrape_common import fetch_soup, sleep_with_jitter
 
 BASE = "https://suumo.jp"
-CFG = yaml.safe_load(open(Path(__file__).parent / "config.yaml"))
+CFG = yaml.safe_load(
+    (Path(__file__).parent / "config.yaml").read_text())
 EK_CODES = CFG["ek_codes"]
 
 def init_db(rebuild=False):
@@ -93,24 +95,22 @@ def _get_or_create_unit(con, bid, r):
               r.get("direction"), r.get("direction"))
     # 1段目: 厳密照合（階が一致、または両方とも NULL）
     row = con.execute(base + " AND (floor IS ? OR floor=?)",
-                      params + (r["floor"], r["floor"])).fetchone()
+                      (*params, r["floor"], r["floor"])).fetchone()
     if row is None:
         # 2段目 (F6): どちらか一方の階が NULL の unit も候補にする。
         # 候補が複数ある場合は別室の可能性があるため推測で寄せない。
         cands = con.execute(base + " AND (floor IS NULL OR ? IS NULL)",
-                            params + (r["floor"],)).fetchall()
+                            (*params, r["floor"])).fetchall()
         if len(cands) == 1:
             row = cands[0]
     if row:
         uid, ufloor = row
         if ufloor is None and r["floor"] is not None:
             # 階数の補完: 照合できた unit に今回分かった階を埋める
-            try:
+            with contextlib.suppress(sqlite3.IntegrityError):
                 con.execute(
                     "UPDATE units SET floor=? WHERE id=? AND floor IS NULL",
-                    (r["floor"], uid))
-            except sqlite3.IntegrityError:
-                pass  # UNIQUE(building,floor,area,layout) 競合時は補完のみ諦める
+                    (r["floor"], uid))  # UNIQUE(building,floor,area,layout) 競合時は補完のみ諦める
         return uid
     con.execute("INSERT INTO units(building_id,floor,area_m2,layout,direction)"
                 " VALUES(?,?,?,?,?)",
