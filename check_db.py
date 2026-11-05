@@ -1,7 +1,8 @@
 import sqlite3
-from pathlib import Path
 
-c = sqlite3.connect(Path(__file__).parent / 'bukken.db')
+from db import DB
+
+c = sqlite3.connect(DB)
 print('--- table counts ---')
 ts = ['buildings','units','listings','stations','costs','amenities','evidence',
       'viewings','favorites','contacts','notifications']

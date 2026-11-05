@@ -19,7 +19,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DB = Path(__file__).parent / "bukken.db"
+from db import DB
+
 API = "https://msearch.gsi.go.jp/address-search/AddressSearch?q="
 UA = {"User-Agent": "bukken-search-geocode/1.0 (personal rental search)"}
 CITY_PREFIX = "大阪府大阪市"

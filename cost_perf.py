@@ -25,7 +25,6 @@ import argparse
 import json
 import re
 import sqlite3
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -34,7 +33,10 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold
 
-DB = Path(__file__).parent / "bukken.db"
+from db import DB
+from models import effective_monthly as _models_effective_monthly
+from models import total_2year as _models_total_2year
+from parse_suumo import jnc_id
 
 # 希少レイアウトを代表区分へ寄せる
 LAYOUT_MAP = {"ワンルーム": "1R", "ワンル": "1R", "1SLK": "1K", "1SK": "1K",
@@ -78,9 +80,8 @@ LEFT JOIN costs c ON c.listing_id = l.id
 """
 
 
-def jnc(url):
-    m = re.search(r"jnc_(\d+)", url or "")
-    return m.group(1) if m else None
+# SUUMO 物件IDの抽出は parse_suumo.jnc_id に一本化
+jnc = jnc_id
 
 
 def load(con):
@@ -349,31 +350,39 @@ def nonrefund_total(r):
     return sum(value_or_zero(r[col]) for col in NONREFUND_COLS)
 
 
-def effective_monthly(r):
-    """実質月額: 管理費+水道+サポート月額+更新/契約月+保証更新/12+初期非返還/24。
+def _opt(value):
+    """pandas の NaN/NaT を None へ。models 側の `or 0` と同じ扱いにする。"""
+    return None if pd.isna(value) else value
 
-    サポート一時金は月額に混ぜない（models.effective_monthly と同じ定義）。
+
+def effective_monthly(r):
+    """実質月額。定義は models.effective_monthly に一本化した行ラッパー。
+
+    従来は同一の式が models とここに二重にあり、片方だけ直すと
+    CLI と画面で実質月額がズレるリスクがあった。
     """
-    months = value_or_zero(r.contract_months) or 24
-    return (r.total_yen + value_or_zero(r.water_fixed_yen)
-            + value_or_zero(r.support_monthly_yen)
-            + value_or_zero(r.guarantee_renew_yen) / 12
-            + value_or_zero(r.renewal_fee_yen) / months
-            + value_or_zero(r.get("renewal_admin_fee_yen")) / months
-            + nonrefund_total(r) / 24)
+    return _models_effective_monthly(
+        rent=r.total_yen, admin=0, water=_opt(r.water_fixed_yen),
+        guarantee_renew=_opt(r.guarantee_renew_yen),
+        renewal_fee=_opt(r.renewal_fee_yen),
+        contract_months=_opt(r.contract_months) or 24,
+        nonrefund_init=nonrefund_total(r),
+        support_monthly=_opt(r.support_monthly_yen),
+        renewal_admin_fee=_opt(r.get("renewal_admin_fee_yen")))
 
 
 def total_2year(r):
-    months = value_or_zero(r.contract_months) or 24
-    return (r.total_yen * 24 + nonrefund_total(r) + value_or_zero(r.deposit_yen)
-            + value_or_zero(r.renewal_fee_yen)
-            + value_or_zero(r.get("renewal_admin_fee_yen"))
-            + value_or_zero(r.guarantee_renew_yen) * 2
-            # サポート費は 一時金 + 月額×契約月数（models と同じ定義）
-            + value_or_zero(r.support_yen)
-            + value_or_zero(r.support_monthly_yen) * months
-            # フリーレント控除は models.total_2year と同じく家賃分のみ
-            - r.rent_yen * value_or_zero(r.free_rent_months))
+    """2年総額。定義は models.total_2year に一本化した行ラッパー。"""
+    return _models_total_2year(
+        rent=r.rent_yen, admin=_opt(r.admin_yen),
+        init_total=nonrefund_total(r) + value_or_zero(r.deposit_yen),
+        renewal_fee=_opt(r.renewal_fee_yen),
+        guarantee_renew=_opt(r.guarantee_renew_yen),
+        free_months=_opt(r.free_rent_months),
+        support_once=_opt(r.support_yen),
+        support_monthly=_opt(r.support_monthly_yen),
+        contract_months=_opt(r.contract_months) or 24,
+        renewal_admin_fee=_opt(r.get("renewal_admin_fee_yen")))
 
 
 def rank(df, fair, meta, a):

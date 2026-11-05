@@ -8,11 +8,9 @@ import json
 import os
 import sqlite3
 import urllib.request
-from pathlib import Path
 
+from db import DB
 from models import score_unit
-
-DB = Path(__file__).parent / "bukken.db"
 
 
 def send_discord(msg):
