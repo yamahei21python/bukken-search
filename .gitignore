@@ -6,3 +6,4 @@ __pycache__/
 bukken_backup.db
 rank_out.txt
 .DS_Store
+bukken.local-*.bak
