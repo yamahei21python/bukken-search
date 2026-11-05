@@ -9,8 +9,10 @@
   - has_bathtub から tub_status を復元
 """
 import re
+
 from db import connect_db
 from parse_suumo import normalize_address, normalize_building_name, strip_building_name
+
 DERIVED_TABLES = ["amenities", "costs", "stations", "listings", "units",
                   "buildings", "evidence"]
 _HB_TUB = {0: "confirmed_no_tub", 1: "confirmed_tub"}
@@ -28,7 +30,7 @@ def _old_rows(con):
                   if c in cols]
     rows = con.execute(
         f"SELECT {','.join(normalized)} FROM properties").fetchall()
-    rows = [dict(zip(normalized, r)) for r in rows]
+    rows = [dict(zip(normalized, r, strict=False)) for r in rows]
     return rows
 
 

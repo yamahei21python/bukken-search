@@ -12,10 +12,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from bs4 import BeautifulSoup
 
 from models import judge_tub, score_unit
-from parse_suumo import (money_pair, parse_detail, to_yen, nfkc, _find_yen,
-                         _guarantee_first_yen, _guarantee_rate,
-                         _guard_rent_multiple, _labeled_yen, _list_row,
-                         normalize_building_name)
+from parse_suumo import (
+    _find_yen,
+    _guarantee_first_yen,
+    _guarantee_rate,
+    _guard_rent_multiple,
+    _labeled_yen,
+    _list_row,
+    money_pair,
+    nfkc,
+    normalize_building_name,
+    parse_detail,
+    to_yen,
+)
 
 
 class TestMoney(unittest.TestCase):
@@ -380,6 +389,7 @@ class TestDropDeadColumn(unittest.TestCase):
 
     def test_initialize_drops_photo_url(self):
         import sqlite3
+
         import db as db_mod
         tmp = Path(__file__).parent / "_tmp_test_drop.db"
         for suf in ("", "-wal", "-shm"):
@@ -412,9 +422,9 @@ class TestDropDeadColumn(unittest.TestCase):
 
 class TestScore(unittest.TestCase):
     def test_score_uses_config(self):
-        u = dict(total=80000, tub_status="likely_no_tub", walk_min=7,
-                 area=22, floor=3, equip="インターネット無料、独立洗面台",
-                 missing=False)
+        u = {"total": 80000, "tub_status": "likely_no_tub", "walk_min": 7,
+             "area": 22, "floor": 3, "equip": "インターネット無料、独立洗面台",
+             "missing": False}
         sc, _ = score_unit(u)
         self.assertEqual(sc, 79.6)
 

@@ -1,0 +1,25 @@
+# ruff の既定ルールセットは版により変動するため、このリポジトリでは
+# 明示的に select して CI を安定させる。
+target-version = "py312"
+line-length = 100
+
+# 過去の datafix は実行済みスナップショット。後から直すべきものでないため対象外。
+# (extend-exclude: ruff 既定の除外 .venv 等を保持したまま追加する)
+extend-exclude = ["datafix"]
+
+[lint]
+# E4/E7/E9: 明白な誤り, F: 未定義・未使用, I: import順,
+# B: よくあるバグ, C4: 内包表記, PIE: 冗長構文,
+# SIM: 単純化, RUF: ruff独自, FURB: 明快化
+select = ["E4", "E7", "E9", "F", "I", "B", "C4", "PIE", "SIM", "RUF", "FURB"]
+ignore = [
+  # スクレイパ・CLI は「1件の失敗で run 全体を止めない」設計であり、
+  # 広い except と try-continue は意図的。個別対応は noqa で示す。
+  "BLE001",
+  "S110",
+  "S112",
+  # 日本語コメント/Docstring の全角括弧・句読点は正しい日本語表記。
+  "RUF001",
+  "RUF002",
+  "RUF003",
+]

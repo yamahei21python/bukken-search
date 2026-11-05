@@ -14,6 +14,7 @@
   python3 rebuild_db.py --dry-run       # バックアップも変更もしない
 """
 import argparse
+import contextlib
 import shutil
 import sqlite3
 from datetime import datetime
@@ -31,11 +32,9 @@ def counts(db_path):
             out[t] = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
         except sqlite3.Error as e:
             out[t] = f"ERR: {e}"
-    try:
+    with contextlib.suppress(sqlite3.Error):
         out["active_listings"] = con.execute(
             "SELECT COUNT(*) FROM listings WHERE active=1").fetchone()[0]
-    except sqlite3.Error:
-        pass
     con.close()
     return out
 

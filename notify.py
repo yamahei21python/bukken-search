@@ -4,11 +4,11 @@
 記録されないので次回に再送される（従来は記録が先で、送信失敗が
 欠落していた）。webhook 未設定時は表示のみで、記録は行う。
 """
+import json
 import os
 import sqlite3
-from pathlib import Path
 import urllib.request
-import json
+from pathlib import Path
 
 from models import score_unit
 
@@ -98,11 +98,12 @@ def check(top_score=60):
                JOIN buildings b ON b.id=u.building_id
                WHERE l.active=1 AND l.rent_yen + l.admin_yen<=100000
                LIMIT 1000"""):
-        sc, _ = score_unit(dict(
-            total=r["total"], tub_status=r["tub_status"],
-            walk_min=r["walk_min"], area=r["area"], floor=r["floor"],
-            equip=r["equip"] or "", autolock=bool(r["autolock"]),
-            missing=not r["has_ev"]))
+        sc, _ = score_unit({
+            "total": r["total"], "tub_status": r["tub_status"],
+            "walk_min": r["walk_min"], "area": r["area"],
+            "floor": r["floor"], "equip": r["equip"] or "",
+            "autolock": bool(r["autolock"]),
+            "missing": not r["has_ev"]})
         if sc >= top_score:
             scored.append((sc, r["id"], r["url"]))
     scored.sort(reverse=True)

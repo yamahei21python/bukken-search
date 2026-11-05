@@ -280,7 +280,7 @@ def fit_fair(df, alpha, model="blend"):
     if "building_id" in df.columns:
         groups = np.array([
             f"b{int(b)}" if pd.notna(b) else f"n{n}"
-            for b, n in zip(df["building_id"], df["name"])])
+            for b, n in zip(df["building_id"], df["name"], strict=False)])
     else:
         groups = df.name.values
     n_groups = len(set(groups))

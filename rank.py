@@ -2,8 +2,9 @@
 import argparse
 import sqlite3
 from pathlib import Path
-from models import (effective_monthly, total_2year, score_unit,
-                    is_shower_candidate)
+
+from models import effective_monthly, is_shower_candidate, score_unit, total_2year
+
 DB = Path(__file__).parent / "bukken.db"
 ap = argparse.ArgumentParser()
 ap.add_argument("--max-total", type=int, default=100000)
@@ -51,7 +52,7 @@ for r in rows:
     nonrefund = (r["km"] or 0) + (r["ag"] or 0) + (r["gf"] or 0) \
         + (r["ins"] or 0) + (r["kx"] or 0) + (r["cl"] or 0)
     init_total = nonrefund + (r["dep"] or 0)
-    fetched = r["fetched"] if "fetched" in r.keys() else 0
+    fetched = r["fetched"] if "fetched" in r.keys() else 0  # noqa: SIM118
     eff = effective_monthly(r["rent"], r["admin"], r["water"], 0,
                             r["gren"], r["rf"], r["cm"] or 24, nonrefund,
                             support_monthly=r["supm"],
@@ -65,11 +66,11 @@ for r in rows:
         and is_shower_candidate(r["equip"] or "")
     if a.shower_only and not shower:
         continue
-    sc, reasons = score_unit(dict(total=total, tub_status=r["tub_status"],
-                                  walk_min=r["walk_min"], area=r["area"],
-                                  floor=r["floor"], equip=r["equip"] or "",
-                                  autolock=bool(r["autolock"]),
-                                  missing=missing))
+    sc, reasons = score_unit({"total": total, "tub_status": r["tub_status"],
+                              "walk_min": r["walk_min"], "area": r["area"],
+                              "floor": r["floor"], "equip": r["equip"] or "",
+                              "autolock": bool(r["autolock"]),
+                              "missing": missing})
     hits.append((sc, eff, dict(r) | {"total": total, "t2": t2,
                                      "init": init_total, "reasons": reasons,
                                      "fetched": fetched, "shower": shower}))

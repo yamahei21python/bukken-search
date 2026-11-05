@@ -1,8 +1,11 @@
 """実質費用・湯船5段階判定・100点スコア"""
 import unicodedata
-import yaml
 from pathlib import Path
-CFG = yaml.safe_load(open(Path(__file__).parent / "config.yaml"))
+
+import yaml
+
+CFG = yaml.safe_load(
+    (Path(__file__).parent / "config.yaml").read_text())
 
 def effective_monthly(rent, admin=0, water=0, support=0,
                       guarantee_renew=0, renewal_fee=0,
@@ -182,9 +185,11 @@ def score_unit(u, weights=None):
         t5 = R.get("transit_walk5") or 8
         t10 = R.get("transit_walk10") or 4
         if wk <= 5:
-            s += w["transit"]; reasons.append("walk<=5")
+            s += w["transit"]
+            reasons.append("walk<=5")
         elif wk <= 10:
-            s += w["transit"] * (t10 / t5); reasons.append("walk<=10")
+            s += w["transit"] * (t10 / t5)
+            reasons.append("walk<=10")
     # 広さ10点: 20m2で満点、15m2で0へ線形
     area = u.get("area") or 0
     s += w["size"] * min(1, max(0, (area - 15) / 5))
@@ -192,19 +197,24 @@ def score_unit(u, weights=None):
     # 騒音10点: 満点から減点
     nz = w["noise"]
     if (u.get("highway_m") or 9999) <= 100:
-        nz += R["highway100"]; reasons.append("highway-10")
+        nz += R["highway100"]
+        reasons.append("highway-10")
     if (u.get("road_m") or 9999) <= 50:
-        nz += R["road50"]; reasons.append("road-10")
+        nz += R["road50"]
+        reasons.append("road-10")
     if (u.get("floor") or 2) <= 1:
-        nz += R["penalty_1f"]; reasons.append("1F-5")
+        nz += R["penalty_1f"]
+        reasons.append("1F-5")
     s += max(0, nz)
     # 設備: config の free_net / washstand（合計はカテゴリ重みで頭打ち）
     eq = u.get("equip") or ""
     eq_pts = 0.0
     if "無料" in eq and "インターネット" in eq:
-        eq_pts += R.get("free_net", w["equip"] / 2); reasons.append("free-net")
+        eq_pts += R.get("free_net", w["equip"] / 2)
+        reasons.append("free-net")
     if "独立" in eq and "洗面" in eq:
-        eq_pts += R.get("washstand", w["equip"] / 2); reasons.append("washstand")
+        eq_pts += R.get("washstand", w["equip"] / 2)
+        reasons.append("washstand")
     s += min(eq_pts, w["equip"])
     # 防災防犯7点: 新耐震・オートロック・2階以上で加点、欠損で減点
     sf = 0.0
@@ -215,8 +225,10 @@ def score_unit(u, weights=None):
     if (u.get("floor") or 1) >= 2:
         sf += w["safety"] * 0.3
     if u.get("cancel_penalty"):
-        sf += R["penalty_short_cancel2m"]; reasons.append("cancel-10")
+        sf += R["penalty_short_cancel2m"]
+        reasons.append("cancel-10")
     if u.get("missing"):
-        sf += R["missing_info"]; reasons.append("missing-5")
+        sf += R["missing_info"]
+        reasons.append("missing-5")
     s += max(0, sf)
     return round(s, 1), reasons
