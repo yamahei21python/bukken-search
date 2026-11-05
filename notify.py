@@ -34,8 +34,8 @@ def _already(con, lid, kind, msg=None):
         " AND message=?", (lid, kind, msg)).fetchone()
 
 
-def check(top_score=60):
-    con = sqlite3.connect(DB)
+def _collect_pending(con, top_score):
+    """5種類の通知候補を集める。重複は _already / LEFT JOIN で落とす。"""
     con.row_factory = sqlite3.Row
     pending = []  # (listing_id, kind, message)
 
@@ -109,24 +109,45 @@ def check(top_score=60):
         msg = f"高スコア {sc}点 {url}"
         if not _already(con, lid, "score", msg):
             pending.append((lid, "score", msg))
-    con.close()
+    return pending
 
-    # 送信できてから記録する
-    con = sqlite3.connect(DB)
+
+def _deliver(pending, sender=None, con=None):
+    """送信できてから記録する。失敗分は記録せず次回に再送される。
+
+    sender/con はテスト差し替え用。既定は Discord 送信と実 DB。
+    """
+    sender = sender or send_discord
+    own_con = con is None
+    if own_con:
+        con = sqlite3.connect(DB)
     sent = 0
-    for lid, kind, msg in pending:
-        try:
-            send_discord(msg)
-        except Exception as e:
-            print(f"[notify send failed] {kind} listing={lid}: {e}")
-            continue
-        con.execute("INSERT INTO notifications(listing_id,kind,message)"
-                    " VALUES(?,?,?)", (lid, kind, msg))
-        sent += 1
-        print(msg)
-    con.commit()
-    con.close()
+    try:
+        for lid, kind, msg in pending:
+            try:
+                sender(msg)
+            except Exception as e:
+                print(f"[notify send failed] {kind} listing={lid}: {e}")
+                continue
+            con.execute("INSERT INTO notifications(listing_id,kind,message)"
+                        " VALUES(?,?,?)", (lid, kind, msg))
+            sent += 1
+            print(msg)
+        con.commit()
+    finally:
+        if own_con:
+            con.close()
     print(f"{sent} notifications")
+    return sent
+
+
+def check(top_score=60):
+    con = sqlite3.connect(DB)
+    try:
+        pending = _collect_pending(con, top_score)
+    finally:
+        con.close()
+    return _deliver(pending)
 
 
 if __name__ == "__main__":
