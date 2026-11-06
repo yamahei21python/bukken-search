@@ -153,47 +153,49 @@ def judge_tub(d):
             return r
     return "unknown", "", 0.0
 
-def score_unit(u, weights=None):
-    """100点満点: total30/tub20/transit15/size10/noise10/equip8/safety7。
-    u: dict(total, tub_status, walk_min, area, equip,
-    highway_m, road_m, floor, cancel_penalty, missing,
-    autolock, elevator, new_seismic) -> (score, reasons)"""
-    w = weights or CFG["weights"]
-    R = CFG["rules"]
-    s, reasons = 0, []
+def _score_total(total, w, R):
+    """総額30点: must-2万以下で満点、mustで0点へ線形。"""
     must = R["must_total_max"]
-    total = u.get("total") or 0
     if total > must:
-        return -999, ["must_total over"]
-    # 総額30点: must-2万以下で満点、mustで0点へ線形
-    s += w["total"] * max(0, 1 - (total - (must - 20000)) / 20000) \
+        return -999, None
+    pts = w["total"] * max(0, 1 - (total - (must - 20000)) / 20000) \
         if total > must - 20000 else w["total"]
-    reasons.append(f"total {total}")
-    # 湯船: config の tub_scores をカテゴリ最大値比として使う
-    # （従来は同じ比率がコードにハードコードされ config が効かなかった）
+    return pts, [f"total {total}"]
+
+
+def _score_tub(ts, w, R):
+    """湯船: config の tub_scores をカテゴリ最大値比として使う
+    （従来は同じ比率がコードにハードコードされ config が効かなかった）。"""
     tub_scores = R.get("tub_scores") or {}
-    ts = u.get("tub_status", "unknown")
+    pts = 0.0
     if tub_scores:
         top = max(tub_scores.values()) or 1
-        s += w["tub"] * (tub_scores.get(ts, 0) / top)
-    reasons.append(f"tub {ts}")
-    # 交通: config の transit_walk5/walk10 の比率で按分
-    wk = u.get("walk_min")
-    if wk is not None:
-        t5 = R.get("transit_walk5") or 8
-        t10 = R.get("transit_walk10") or 4
-        if wk <= 5:
-            s += w["transit"]
-            reasons.append("walk<=5")
-        elif wk <= 10:
-            s += w["transit"] * (t10 / t5)
-            reasons.append("walk<=10")
-    # 広さ10点: 20m2で満点、15m2で0へ線形
-    area = u.get("area") or 0
-    s += w["size"] * min(1, max(0, (area - 15) / 5))
-    reasons.append(f"area {area}")
-    # 騒音10点: 満点から減点
+        pts = w["tub"] * (tub_scores.get(ts, 0) / top)
+    return pts, [f"tub {ts}"]
+
+
+def _score_transit(walk_min, w, R):
+    """交通: config の transit_walk5/walk10 の比率で按分。"""
+    if walk_min is None:
+        return 0.0, []
+    t5 = R.get("transit_walk5") or 8
+    t10 = R.get("transit_walk10") or 4
+    if walk_min <= 5:
+        return w["transit"], ["walk<=5"]
+    if walk_min <= 10:
+        return w["transit"] * (t10 / t5), ["walk<=10"]
+    return 0.0, []
+
+
+def _score_size(area, w):
+    """広さ10点: 20m2で満点、15m2で0へ線形。"""
+    return w["size"] * min(1, max(0, (area - 15) / 5)), [f"area {area}"]
+
+
+def _score_noise(u, w, R):
+    """騒音10点: 満点から減点。"""
     nz = w["noise"]
+    reasons = []
     if (u.get("highway_m") or 9999) <= 100:
         nz += R["highway100"]
         reasons.append("highway-10")
@@ -203,19 +205,27 @@ def score_unit(u, weights=None):
     if (u.get("floor") or 2) <= 1:
         nz += R["penalty_1f"]
         reasons.append("1F-5")
-    s += max(0, nz)
-    # 設備: config の free_net / washstand（合計はカテゴリ重みで頭打ち）
+    return max(0, nz), reasons
+
+
+def _score_equip(u, w, R):
+    """設備: config の free_net / washstand（合計はカテゴリ重みで頭打ち）。"""
     eq = u.get("equip") or ""
     eq_pts = 0.0
+    reasons = []
     if "無料" in eq and "インターネット" in eq:
         eq_pts += R.get("free_net", w["equip"] / 2)
         reasons.append("free-net")
     if "独立" in eq and "洗面" in eq:
         eq_pts += R.get("washstand", w["equip"] / 2)
         reasons.append("washstand")
-    s += min(eq_pts, w["equip"])
-    # 防災防犯7点: 新耐震・オートロック・2階以上で加点、欠損で減点
+    return min(eq_pts, w["equip"]), reasons
+
+
+def _score_safety(u, w, R):
+    """防災防犯7点: 新耐震・オートロック・2階以上で加点、欠損で減点。"""
     sf = 0.0
+    reasons = []
     if u.get("new_seismic"):
         sf += w["safety"] * 0.4
     if u.get("autolock"):
@@ -228,5 +238,41 @@ def score_unit(u, weights=None):
     if u.get("missing"):
         sf += R["missing_info"]
         reasons.append("missing-5")
-    s += max(0, sf)
+    return max(0, sf), reasons
+
+
+def score_unit(u, weights=None):
+    """100点満点: total30/tub20/transit15/size10/noise10/equip8/safety7。
+    u: dict(total, tub_status, walk_min, area, equip,
+    highway_m, road_m, floor, cancel_penalty, missing,
+    autolock, elevator, new_seismic) -> (score, reasons)
+
+    加点はカテゴリ別の _score_* ヘルパーに分解してある
+    （重み配分と理由文字列は旧実装と同一）。
+    """
+    w = weights or CFG["weights"]
+    R = CFG["rules"]
+    total = u.get("total") or 0
+    s, reasons = _score_total(total, w, R)
+    if s == -999:
+        return -999, ["must_total over"]
+    ts = u.get("tub_status", "unknown")
+    p, rs = _score_tub(ts, w, R)
+    s += p
+    reasons += rs
+    p, rs = _score_transit(u.get("walk_min"), w, R)
+    s += p
+    reasons += rs
+    p, rs = _score_size(u.get("area") or 0, w)
+    s += p
+    reasons += rs
+    p, rs = _score_noise(u, w, R)
+    s += p
+    reasons += rs
+    p, rs = _score_equip(u, w, R)
+    s += p
+    reasons += rs
+    p, rs = _score_safety(u, w, R)
+    s += p
+    reasons += rs
     return round(s, 1), reasons

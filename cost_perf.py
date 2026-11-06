@@ -264,36 +264,19 @@ def make_gbm():
         min_samples_leaf=30, l2_regularization=1.0, random_state=0)
 
 
-def fit_fair(df, alpha, model="blend"):
-    """公正価値(賃料ベース月額)を返す。建物単位のGroupKFoldで品質を測る。
-
-    ranking には OOF(学習に使っていない予測)を使う。学習データ自身の残差は
-    割安度が楽観的に出るため。--insample 指定時は全学習予測を使う。
-
-    model: ridge (線形ヘドニック) / gbm (勾配ブースティング) /
-    blend (両者のOOFをMAE逆数で加重平均; 既定)。
-    あわせて分位点回帰で予測区間 (q10/q90) を返し、実額が下限をも
-    下回る「堅い割安」を区別できるようにする。
-    """
-    X = build_features(df)
-    y = np.log(df.total_yen.values)
-    # グループは建物IDを使う。物件名文字列だと同一建物が別名で
-    # 学習/検証に漏れ、逆に無関係な建物が同じ説明名で混ざる
+def _group_labels(df):
+    """GroupKFold 用のグループラベル。建物IDを使う。物件名文字列だと
+    同一建物が別名で学習/検証に漏れ、逆に無関係な建物が同じ説明名で
+    混ざる。"""
     if "building_id" in df.columns:
-        groups = np.array([
+        return np.array([
             f"b{int(b)}" if pd.notna(b) else f"n{n}"
             for b, n in zip(df["building_id"], df["name"], strict=False)])
-    else:
-        groups = df.name.values
-    n_groups = len(set(groups))
+    return df.name.values
 
-    factories = {"ridge": lambda: Ridge(alpha=alpha), "gbm": make_gbm}
-    names = ["ridge", "gbm"] if model == "blend" else [model]
-    splits = None
-    if n_groups >= 2:
-        gkf = GroupKFold(n_splits=min(5, n_groups))
-        splits = list(gkf.split(X, y, groups))
 
+def _fit_models(X, y, df, factories, names, splits):
+    """各モデルの OOF/insample 予測と CV 指標を返す。"""
     oof_log, ins_log, metrics = {}, {}, {}
     for name in names:
         if splits:
@@ -308,7 +291,11 @@ def fit_fair(df, alpha, model="blend"):
         r2 = 1 - np.sum((y - oof_log[name]) ** 2) / np.sum((y - y.mean()) ** 2)
         mae = mean_absolute_error(df.total_yen, np.exp(oof_log[name]))
         metrics[name] = {"r2": float(r2), "mae_yen": float(mae)}
+    return oof_log, ins_log, metrics
 
+
+def _blend_predictions(oof_log, ins_log, metrics, names, model):
+    """model=blend は OOF を MAE 逆数で加重平均する。"""
     if model == "blend":
         wts = {n: 1.0 / max(metrics[n]["mae_yen"], 1.0) for n in names}
         tot = sum(wts.values())
@@ -318,13 +305,12 @@ def fit_fair(df, alpha, model="blend"):
     else:
         oof, ins = oof_log[model], ins_log[model]
         weights = {model: 1.0}
+    return oof, ins, weights
 
-    r2 = 1 - np.sum((y - oof) ** 2) / np.sum((y - y.mean()) ** 2)
-    mae = mean_absolute_error(df.total_yen, np.exp(oof))
-    sigma = max(float(np.std(y - oof)), np.finfo(float).eps)
 
-    # 予測区間 (分位点回帰, 全データ学習)。区間自体の表示と、
-    # 実額 < q10 の「堅い割安」判定に使う。
+def _fit_quantiles(X, y):
+    """予測区間 (分位点回帰, 全データ学習)。区間自体の表示と、
+    実額 < q10 の「堅い割安」判定に使う。"""
     q = {}
     for a_q, key in ((0.10, "q10"), (0.90, "q90")):
         try:
@@ -334,12 +320,51 @@ def fit_fair(df, alpha, model="blend"):
                 l2_regularization=1.0, random_state=0).fit(X, y)
             q[key] = np.exp(mq.predict(X))
         except Exception:
-            q[key] = np.full(len(df), np.nan)
+            q[key] = np.full(len(y), np.nan)
+    return q["q10"], q["q90"]
+
+
+def fit_fair(df, alpha, model="blend"):
+    """公正価値(賃料ベース月額)を返す。建物単位のGroupKFoldで品質を測る。
+
+    ranking には OOF(学習に使っていない予測)を使う。学習データ自身の残差は
+    割安度が楽観的に出るため。--insample 指定時は全学習予測を使う。
+
+    model: ridge (線形ヘドニック) / gbm (勾配ブースティング) /
+    blend (両者のOOFをMAE逆数で加重平均; 既定)。
+    あわせて分位点回帰で予測区間 (q10/q90) を返し、実額が下限をも
+    下回る「堅い割安」を区別できるようにする。
+
+    76行あった本体はグループラベル/モデル適合/ブレンド/分位点の
+    ヘルパーへ分解した（計算は旧実装と同一）。
+    """
+    X = build_features(df)
+    y = np.log(df.total_yen.values)
+    groups = _group_labels(df)
+    n_groups = len(set(groups))
+
+    factories = {"ridge": lambda: Ridge(alpha=alpha), "gbm": make_gbm}
+    names = ["ridge", "gbm"] if model == "blend" else [model]
+    splits = None
+    if n_groups >= 2:
+        gkf = GroupKFold(n_splits=min(5, n_groups))
+        splits = list(gkf.split(X, y, groups))
+
+    oof_log, ins_log, metrics = _fit_models(X, y, df, factories, names,
+                                            splits)
+    oof, ins, weights = _blend_predictions(oof_log, ins_log, metrics,
+                                           names, model)
+
+    r2 = 1 - np.sum((y - oof) ** 2) / np.sum((y - y.mean()) ** 2)
+    mae = mean_absolute_error(df.total_yen, np.exp(oof))
+    sigma = max(float(np.std(y - oof)), np.finfo(float).eps)
+
+    q10, q90 = _fit_quantiles(X, y)
 
     return np.exp(oof), np.exp(ins), {
         "r2": float(r2), "mae_yen": float(mae), "sigma_log": sigma,
         "models": metrics, "weights": weights,
-        "q10": q["q10"], "q90": q["q90"]}
+        "q10": q10, "q90": q90}
 
 
 def value_or_zero(value):
