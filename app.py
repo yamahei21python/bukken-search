@@ -16,11 +16,6 @@ st.set_page_config(layout="wide")
 st.title("阿波座 賃貸選別")
 
 
-@st.cache_data(show_spinner="データ読込中...")
-def _load_df():
-    return app_data.load_df()
-
-
 @st.cache_data(show_spinner="公正価値を計算中...")
 def _run_pipeline(max_total, min_total, min_area, max_area, walk_max,
                   max_age_days, layout, station):

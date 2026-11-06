@@ -83,19 +83,27 @@ def _parse_and_apply_detail(con, lid, uid, url, source, include_equipment=False)
     print(output)
 
 
-def apply_detail(con, lid, uid, url, d):
-    status, kw, conf = judge_tub(d)
+def _build_note(d):
+    """costs.note 用の備考。保証金・敷引償却は costs に専用列が無い
+    ため note 側に付記する。"""
     note = (d.get("note") or "")
     if d.get("hoshoukin_yen") is not None:
         note += f" 保証金{d['hoshoukin_yen']}"
     if d.get("shoukyaku_yen") is not None:
         note += f" 敷引償却{d['shoukyaku_yen']}"
+    return note
 
-    # 判定は evidence に残してから unit 単位で集約する。従来は
-    # listing ごとの判定で units / properties を上書きしており
-    # （last-writer-wins）、最後に取得した listing の誤判定が
-    # unit 全体に広がっていた。集約では強い浴槽証拠が1件でも
-    # あれば unit は湯船側になる。
+
+def _record_tub_evidence(con, uid, url, d):
+    """tub 判定を evidence に残してから unit 単位で集約する。
+
+    従来は listing ごとの判定で units / properties を上書きしており
+    （last-writer-wins）、最後に取得した listing の誤判定が
+    unit 全体に広がっていた。集約では強い浴槽証拠が1件でも
+    あれば unit は湯船側になる。
+    -> (集約後 status, conf, hb, 判定キーワード)
+    """
+    status, kw, conf = judge_tub(d)
     con.execute("DELETE FROM evidence WHERE unit_id=? AND url=?"
                 " AND method='detail_parse'", (uid, url))
     con.execute("INSERT INTO evidence(unit_id,tub_status,quote,url,method,"
@@ -108,7 +116,11 @@ def apply_detail(con, lid, uid, url, d):
         " WHERE unit_id=? AND method='detail_parse'", (uid,)).fetchall()
     status, conf = aggregate_tub_status(verdicts)
     hb = _TUB_INT.get(status, -1)
+    return status, conf, hb, kw
 
+
+def _apply_listing_row(con, lid, d):
+    """listings (掲載) 行を更新する。"""
     con.execute("UPDATE listings SET rent_yen=COALESCE(?,rent_yen),"
                 " admin_yen=COALESCE(?,admin_yen), shikikin=?, reikin=?,"
                 " last_seen=datetime('now') WHERE id=?",
@@ -116,6 +128,10 @@ def apply_detail(con, lid, uid, url, d):
                  None if d["deposit_yen"] is None else str(d["deposit_yen"]),
                  None if d["key_money_yen"] is None else str(d["key_money_yen"]),
                  lid))
+
+
+def _apply_property_row(con, lid, url, d, hb, kw):
+    """properties (画面用ビュー相当) 行を更新し、異常値を掃除する。"""
     # 注意: 7054c2e でこの UPDATE が壊れていた（存在しないキー
     # shikikin_yen/reikin_yen を参照し KeyError、placeholder 数も不一致、
     # WHERE id=listings.id で別物件を更新しうる）。parse_detail の
@@ -154,6 +170,10 @@ def apply_detail(con, lid, uid, url, d):
     if d.get("agent"):
         con.execute("UPDATE listings SET agent=? WHERE id=?",
                     (d["agent"], lid))
+
+
+def _apply_unit_row(con, uid, d, status, conf):
+    """units 行を更新し、専有面積を詳細値で補正する。"""
     con.execute("UPDATE units SET tub_status=?, tub_confidence=?,"
                 " direction=COALESCE(?,direction) WHERE id=?",
                 (status, conf, d.get("direction"), uid))
@@ -172,16 +192,22 @@ def apply_detail(con, lid, uid, url, d):
             if not clash:
                 con.execute("UPDATE units SET area_m2=? WHERE id=?",
                             (d["area_m2"], uid))
-    # バスタブは部屋（ユニット）の属性なので、同一ユニットの別掲載
-    # （他仲介 listings に紐づく properties）にも同じ判定を伝える。
-    # 従来は掲載ごとに判定が食い違い、参照先で割れていた（61件）。
+
+
+def _propagate_tub(con, uid, hb):
+    """バスタブは部屋（ユニット）の属性なので、同一ユニットの別掲載
+    （他仲介 listings に紐づく properties）にも同じ判定を伝える。
+    従来は掲載ごとに判定が食い違い、参照先で割れていた（61件）。"""
     con.execute("UPDATE properties SET has_bathtub=? WHERE detail_url IN"
                 " (SELECT url FROM listings WHERE unit_id=?)", (hb, uid))
-    # 詳細側の駅情報で stations を置き換える。従来は一覧側と
-    # union マージしていたため、一覧カセットに混入した仲介店舗の
-    # 駅（物件と無関係な「四ツ橋駅 歩1分」等）が永遠に残り、
-    # 最寄り駅・徒歩が誤っていた。詳細の駅は物件情報ブロック
-    # 由来で正確なため、返ってきた場合は丸ごと差し替える。
+
+
+def _replace_stations(con, uid, url, d):
+    """詳細側の駅情報で stations を置き換える。従来は一覧側と
+    union マージしていたため、一覧カセットに混入した仲介店舗の
+    駅（物件と無関係な「四ツ橋駅 歩1分」等）が永遠に残り、
+    最寄り駅・徒歩が誤っていた。詳細の駅は物件情報ブロック
+    由来で正確なため、返ってきた場合は丸ごと差し替える。"""
     dstations = d.get("stations") or []
     if dstations:
         con.execute("DELETE FROM stations WHERE unit_id=?", (uid,))
@@ -198,7 +224,15 @@ def apply_detail(con, lid, uid, url, d):
         con.execute("UPDATE properties SET station=?, walk_min=?"
                     " WHERE detail_url=?",
                     (near[0], near[1], canonical_url(url)))
-    # 建物設備フラグ（言及がある場合のみ立てる。無言及は NULL のまま）
+
+
+def _apply_building_flags(con, uid, d):
+    """建物設備フラグ・構造・階数・角住戸を反映する。
+
+    設備フラグは言及がある場合のみ立てる（無言及は NULL のまま）。
+    構造・階数は建物マスタへも反映する（従来は properties にしか
+    書いておらず、buildings.structure が常時 NULL だった）。
+    """
     equip = d.get("equipment") or ""
     bflags = {}
     if "オートロック" in equip:
@@ -207,43 +241,52 @@ def apply_detail(con, lid, uid, url, d):
         bflags["elevator"] = 1
     if "宅配ボックス" in equip or "宅配BOX" in equip:
         bflags["delivery_box"] = 1
-    if bflags:
-        bid = con.execute("SELECT building_id FROM units WHERE id=?",
-                          (uid,)).fetchone()
-        if bid:
-            sets = ",".join(f"{k}=?" for k in bflags)
-            con.execute(f"UPDATE buildings SET {sets} WHERE id=?",
-                        (*bflags.values(), bid[0]))
-    # 建物マスタへも構造・階数を反映する（従来は properties にしか
-    # 書いておらず、buildings.structure が常時 NULL だった）
-    if d.get("structure") or d.get("floors"):
-        bid = con.execute("SELECT building_id FROM units WHERE id=?",
-                          (uid,)).fetchone()
-        if bid:
-            con.execute("UPDATE buildings SET"
-                        " structure=COALESCE(?,structure),"
-                        " floors=COALESCE(?,floors) WHERE id=?",
-                        (d.get("structure"),
-                         str(d["floors"]) if d.get("floors") else None,
-                         bid[0]))
+    bid = None
+    if bflags or d.get("structure") or d.get("floors"):
+        brow = con.execute("SELECT building_id FROM units WHERE id=?",
+                           (uid,)).fetchone()
+        bid = brow[0] if brow else None
+    if bflags and bid:
+        sets = ",".join(f"{k}=?" for k in bflags)
+        con.execute(f"UPDATE buildings SET {sets} WHERE id=?",
+                    (*bflags.values(), bid))
+    if bid and (d.get("structure") or d.get("floors")):
+        con.execute("UPDATE buildings SET"
+                    " structure=COALESCE(?,structure),"
+                    " floors=COALESCE(?,floors) WHERE id=?",
+                    (d.get("structure"),
+                     str(d["floors"]) if d.get("floors") else None,
+                     bid))
     # SUUMO の実文言は「角住戸」が主流（「角部屋」だけ見ていたため
     # 該当735件のうち1件しか立っていなかった）
     if "角部屋" in equip or "角住戸" in equip:
         con.execute("UPDATE units SET corner=1 WHERE id=?", (uid,))
+
+
+def _save_snapshot(con, lid, d):
+    """当日分のスナップショットを作り直して記録する。"""
     con.execute("DELETE FROM listing_snapshots WHERE listing_id=?"
                 " AND date(fetched_at)=date('now')", (lid,))
     con.execute("INSERT INTO listing_snapshots(listing_id,rent_yen,admin_yen,"
                 "active,equip_text) VALUES(?,?,?,1,?)",
                 (lid, d["rent_yen"], d["admin_yen"], d["equipment"][:2000]))
-    # （evidence の記録と unit 集約は関数の冒頭で行う）
-    # 設備テキストを amenities へ分解（従来は未投入で常に0件だった）
-    # 設備でない長文（PR文・物件概要の塊が混入したケースがある）は
-    # アメニティ名として登録しない。
+
+
+def _apply_amenities(con, uid, d):
+    """設備テキストを amenities へ分解（従来は未投入で常に0件だった）。
+
+    設備でない長文（PR文・物件概要の塊が混入したケースがある）は
+    アメニティ名として登録しない。
+    """
     for name in (d.get("equipment") or "").replace(" ", "").split("、"):
         name = name.strip()
         if name and len(name) <= 20 and "。" not in name:
             con.execute("INSERT OR IGNORE INTO amenities(unit_id,name)"
                         " VALUES(?,?)", (uid, name))
+
+
+def _apply_costs_row(con, lid, d, note):
+    """初期費用を costs へ確定する (fetched=1)。"""
     con.execute(
         "INSERT OR REPLACE INTO costs(listing_id,key_money_yen,deposit_yen,"
         "agency_yen,guarantee_first_yen,guarantee_renew_yen,insurance_yen,"
@@ -262,6 +305,26 @@ def apply_detail(con, lid, uid, url, d):
          d["renewal_fee_yen"], d.get("renewal_admin_fee_yen"),
          d.get("contract_months"),
          d["free_rent_months"], d["regular_lease"], note[:500]))
+
+
+def apply_detail(con, lid, uid, url, d):
+    """詳細パース結果を listings/properties/units/stations/buildings/
+    listing_snapshots/amenities/evidence/costs へ適用する。
+
+    179行あった本体はセクション単位のヘルパーへ分解した
+    （実行順と SQL は旧実装と同一）。
+    """
+    status, conf, hb, kw = _record_tub_evidence(con, uid, url, d)
+    note = _build_note(d)
+    _apply_listing_row(con, lid, d)
+    _apply_property_row(con, lid, url, d, hb, kw)
+    _apply_unit_row(con, uid, d, status, conf)
+    _propagate_tub(con, uid, hb)
+    _replace_stations(con, uid, url, d)
+    _apply_building_flags(con, uid, d)
+    _save_snapshot(con, lid, d)
+    _apply_amenities(con, uid, d)
+    _apply_costs_row(con, lid, d, note)
 
 
 def run(limit=50, sleep=5.0, jitter=2.0, only_missing=True, max_seconds=0,
