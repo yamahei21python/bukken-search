@@ -169,8 +169,89 @@ def _txt(v):
     return None if v is None else str(v)
 
 
+def _upsert_listing(con, uid, r):
+    """listings を URL キーで upsert し listing id を返す。"""
+    rent, admin = r["rent_yen"], r["admin_yen"]
+    row = con.execute("SELECT id FROM listings WHERE url=?",
+                      (r["url"],)).fetchone()
+    if row:
+        lid = row[0]
+        con.execute("UPDATE listings SET unit_id=?,rent_yen=?,admin_yen=?,"
+                    "shikikin=?,reikin=?,last_seen=datetime('now'),"
+                    "active=1 WHERE id=?",
+                    (uid, rent, admin, _txt(r["shikikin_yen"]),
+                     _txt(r["reikin_yen"]), lid))
+        return lid
+    con.execute(
+        "INSERT INTO listings(unit_id,site,url,rent_yen,admin_yen,"
+        "shikikin,reikin,last_seen,active) VALUES(?,?,?,?,?,?,?,"
+        "datetime('now'),1)",
+        (uid, "suumo", r["url"], rent, admin,
+         _txt(r["shikikin_yen"]), _txt(r["reikin_yen"])))
+    return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def _save_costs_placeholder(con, lid, r):
+    """一覧時点の costs 行を作る (fetched=0)。詳細取得で上書きされる。"""
+    con.execute("INSERT OR IGNORE INTO costs(listing_id,key_money_yen,"
+                "deposit_yen,contract_months,fetched) VALUES(?,?,?,?,0)",
+                (lid, r["reikin_yen"], r["shikikin_yen"], None))
+
+
+def _upsert_properties(con, r):
+    """properties を detail_url キーで upsert する。
+
+    ON CONFLICT で更新する。INSERT OR REPLACE だと行が作り直され、
+    詳細取得で入れた equipment / has_bathtub が一覧の再取得のたびに
+    消えてしまうため、一覧由来の列だけを更新する。
+    """
+    rent, admin = r["rent_yen"], r["admin_yen"]
+    total = (rent or 0) + (admin or 0)
+    con.execute(
+        "INSERT INTO properties(name,address,station,walk_min,"
+        "age_years,room_floor,rent_yen,admin_yen,total_yen,shikikin_yen,"
+        "reikin_yen,layout,area_m2,direction,structure,floors,detail_url,"
+        "scraped_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+        "datetime('now'))"
+        " ON CONFLICT(detail_url) DO UPDATE SET"
+        " name=excluded.name,address=excluded.address,"
+        # 徒歩は「最寄り」なので小さい方を残す（詳細で判明した
+        # より正確な徒歩を、一覧の粗い値で戻さないため）
+        " station=CASE WHEN excluded.walk_min IS NOT NULL"
+        " AND (properties.walk_min IS NULL"
+        " OR excluded.walk_min<properties.walk_min)"
+        " THEN excluded.station ELSE properties.station END,"
+        " walk_min=CASE WHEN excluded.walk_min IS NULL"
+        " THEN properties.walk_min"
+        " WHEN properties.walk_min IS NULL THEN excluded.walk_min"
+        " WHEN excluded.walk_min<properties.walk_min"
+        " THEN excluded.walk_min ELSE properties.walk_min END,"
+        " age_years=excluded.age_years,room_floor=excluded.room_floor,"
+        " rent_yen=excluded.rent_yen,admin_yen=excluded.admin_yen,"
+        " total_yen=excluded.total_yen,"
+        " shikikin_yen=excluded.shikikin_yen,"
+        " reikin_yen=excluded.reikin_yen,layout=excluded.layout,"
+        " area_m2=excluded.area_m2,"
+        # direction/structure は一覧側に情報源が無く常に NULL が
+        # 来るため、詳細で埋めた値を COALESCE で保護する
+        # （従来は毎日の一覧保存で NULL に潰れていた）
+        " direction=COALESCE(excluded.direction,properties.direction),"
+        " structure=COALESCE(excluded.structure,properties.structure),"
+        " floors=excluded.floors,"
+        " scraped_at=excluded.scraped_at",
+        (r["name"], r["address"], r["nearest"]["name"],
+         r["nearest"]["walk"], r["age_years"], r["floor"], rent, admin,
+         total, r["shikikin_yen"], r["reikin_yen"], r["layout"],
+         r["area_m2"], r.get("direction"), r.get("structure"),
+         r["floors"], r["url"]))
+
+
 def save(rows):
-    """一覧取得行を properties と正規化テーブルへ upsert。"""
+    """一覧取得行を properties と正規化テーブルへ upsert。
+
+    76行あった本体は listing/costs/properties の upsert ヘルパーへ
+    分解した（SQL と実行順は旧実装と同一）。
+    """
     con = connect_db()
     n = 0
     for r in rows:
@@ -179,68 +260,9 @@ def save(rows):
         bid = _get_or_create_building(con, r)
         uid = _get_or_create_unit(con, bid, r)
         _save_stations(con, uid, r["stations"], r["nearest"])
-        rent, admin = r["rent_yen"], r["admin_yen"]
-        total = (rent or 0) + (admin or 0)
-        row = con.execute("SELECT id FROM listings WHERE url=?",
-                          (r["url"],)).fetchone()
-        if row:
-            lid = row[0]
-            con.execute("UPDATE listings SET unit_id=?,rent_yen=?,admin_yen=?,"
-                        "shikikin=?,reikin=?,last_seen=datetime('now'),"
-                        "active=1 WHERE id=?",
-                        (uid, rent, admin, _txt(r["shikikin_yen"]),
-                         _txt(r["reikin_yen"]), lid))
-        else:
-            con.execute(
-                "INSERT INTO listings(unit_id,site,url,rent_yen,admin_yen,"
-                "shikikin,reikin,last_seen,active) VALUES(?,?,?,?,?,?,?,"
-                "datetime('now'),1)",
-                (uid, "suumo", r["url"], rent, admin,
-                 _txt(r["shikikin_yen"]), _txt(r["reikin_yen"])))
-            lid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
-        con.execute("INSERT OR IGNORE INTO costs(listing_id,key_money_yen,"
-                    "deposit_yen,contract_months,fetched) VALUES(?,?,?,?,0)",
-                    (lid, r["reikin_yen"], r["shikikin_yen"], None))
-        # ON CONFLICT で更新する。INSERT OR REPLACE だと行が作り直され、
-        # 詳細取得で入れた equipment / has_bathtub が一覧の再取得のたびに
-        # 消えてしまうため、一覧由来の列だけを更新する。
-        con.execute(
-            "INSERT INTO properties(name,address,station,walk_min,"
-            "age_years,room_floor,rent_yen,admin_yen,total_yen,shikikin_yen,"
-            "reikin_yen,layout,area_m2,direction,structure,floors,detail_url,"
-            "scraped_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-            "datetime('now'))"
-            " ON CONFLICT(detail_url) DO UPDATE SET"
-            " name=excluded.name,address=excluded.address,"
-            # 徒歩は「最寄り」なので小さい方を残す（詳細で判明した
-            # より正確な徒歩を、一覧の粗い値で戻さないため）
-            " station=CASE WHEN excluded.walk_min IS NOT NULL"
-            " AND (properties.walk_min IS NULL"
-            " OR excluded.walk_min<properties.walk_min)"
-            " THEN excluded.station ELSE properties.station END,"
-            " walk_min=CASE WHEN excluded.walk_min IS NULL"
-            " THEN properties.walk_min"
-            " WHEN properties.walk_min IS NULL THEN excluded.walk_min"
-            " WHEN excluded.walk_min<properties.walk_min"
-            " THEN excluded.walk_min ELSE properties.walk_min END,"
-            " age_years=excluded.age_years,room_floor=excluded.room_floor,"
-            " rent_yen=excluded.rent_yen,admin_yen=excluded.admin_yen,"
-            " total_yen=excluded.total_yen,"
-            " shikikin_yen=excluded.shikikin_yen,"
-            " reikin_yen=excluded.reikin_yen,layout=excluded.layout,"
-            " area_m2=excluded.area_m2,"
-            # direction/structure は一覧側に情報源が無く常に NULL が
-            # 来るため、詳細で埋めた値を COALESCE で保護する
-            # （従来は毎日の一覧保存で NULL に潰れていた）
-            " direction=COALESCE(excluded.direction,properties.direction),"
-            " structure=COALESCE(excluded.structure,properties.structure),"
-            " floors=excluded.floors,"
-            " scraped_at=excluded.scraped_at",
-            (r["name"], r["address"], r["nearest"]["name"],
-             r["nearest"]["walk"], r["age_years"], r["floor"], rent, admin,
-             total, r["shikikin_yen"], r["reikin_yen"], r["layout"],
-             r["area_m2"], r.get("direction"), r.get("structure"),
-             r["floors"], r["url"]))
+        lid = _upsert_listing(con, uid, r)
+        _save_costs_placeholder(con, lid, r)
+        _upsert_properties(con, r)
         n += 1
     con.commit()
     con.close()

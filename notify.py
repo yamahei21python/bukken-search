@@ -34,21 +34,22 @@ def _already(con, lid, kind, msg=None):
         " AND message=?", (lid, kind, msg)).fetchone()
 
 
-def _collect_pending(con, top_score):
-    """5種類の通知候補を集める。重複は _already / LEFT JOIN で落とす。"""
-    con.row_factory = sqlite3.Row
-    pending = []  # (listing_id, kind, message)
-
-    # 新着(未通知・新しい順)
+def _pending_new(con):
+    """新着 (未通知・新しい順)。"""
+    out = []
     for r in con.execute(
             "SELECT l.id, l.url, l.rent_yen FROM listings l"
             " LEFT JOIN notifications n ON n.listing_id=l.id"
             " AND n.kind='new'"
             " WHERE n.id IS NULL AND l.active=1"
             " ORDER BY l.first_seen DESC LIMIT 20"):
-        pending.append((r["id"], "new", f"新着 {r['rent_yen']}円 {r['url']}"))
+        out.append((r["id"], "new", f"新着 {r['rent_yen']}円 {r['url']}"))
+    return out
 
-    # 値下げ（過去スナップショットの最高値から下がった分）
+
+def _pending_drop(con):
+    """値下げ（過去スナップショットの最高値から下がった分）。"""
+    out = []
     for r in con.execute(
             """SELECT l.id, l.url, MAX(s.rent_yen) old, l.rent_yen new
                FROM listings l
@@ -57,9 +58,13 @@ def _collect_pending(con, top_score):
                GROUP BY l.id LIMIT 20"""):
         msg = f"値下げ {r['old']}->{r['new']}円 {r['url']}"
         if not _already(con, r["id"], "drop", msg):
-            pending.append((r["id"], "drop", msg))
+            out.append((r["id"], "drop", msg))
+    return out
 
-    # 礼金ゼロ（詳細取得済みで礼金0が確定しているもの）
+
+def _pending_zero(con):
+    """礼金ゼロ（詳細取得済みで礼金0が確定しているもの）。"""
+    out = []
     for r in con.execute(
             """SELECT l.id, l.url FROM listings l
                JOIN costs c ON c.listing_id=l.id
@@ -67,9 +72,13 @@ def _collect_pending(con, top_score):
                AND n.kind='zero'
                WHERE c.fetched=1 AND c.key_money_yen=0 AND l.active=1
                AND n.id IS NULL LIMIT 20"""):
-        pending.append((r["id"], "zero", f"礼金ゼロ {r['url']}"))
+        out.append((r["id"], "zero", f"礼金ゼロ {r['url']}"))
+    return out
 
-    # 湯船確定
+
+def _pending_tub(con):
+    """湯船確定。"""
+    out = []
     for r in con.execute(
             """SELECT l.id, l.url FROM listings l
                JOIN units u ON u.id=l.unit_id
@@ -77,9 +86,12 @@ def _collect_pending(con, top_score):
                AND n.kind='tub'
                WHERE u.tub_status='confirmed_no_tub' AND l.active=1
                AND n.id IS NULL LIMIT 20"""):
-        pending.append((r["id"], "tub", f"湯船なし確定 {r['url']}"))
+        out.append((r["id"], "tub", f"湯船なし確定 {r['url']}"))
+    return out
 
-    # 上位スコア（rank と同じ材料で score_unit を計算）
+
+def _pending_top_score(con, top_score):
+    """上位スコア（rank と同じ材料で score_unit を計算）。"""
     scored = []
     for r in con.execute(
             """SELECT l.id, l.url, l.rent_yen + l.admin_yen total,
@@ -105,10 +117,23 @@ def _collect_pending(con, top_score):
         if sc >= top_score:
             scored.append((sc, r["id"], r["url"]))
     scored.sort(reverse=True)
+    out = []
     for sc, lid, url in scored[:10]:
         msg = f"高スコア {sc}点 {url}"
         if not _already(con, lid, "score", msg):
-            pending.append((lid, "score", msg))
+            out.append((lid, "score", msg))
+    return out
+
+
+def _collect_pending(con, top_score):
+    """5種類の通知候補を集める。重複は _already / LEFT JOIN で落とす。"""
+    con.row_factory = sqlite3.Row
+    pending = []  # (listing_id, kind, message)
+    pending += _pending_new(con)
+    pending += _pending_drop(con)
+    pending += _pending_zero(con)
+    pending += _pending_tub(con)
+    pending += _pending_top_score(con, top_score)
     return pending
 
 
