@@ -43,10 +43,65 @@ def parse_args(argv=None):
     return ap.parse_args(argv)
 
 
+def _passes_filters(r, a):
+    """総額・湯船・徒歩・面積の絞り込み (collect_hits の前段)。"""
+    total = (r["rent"] or 0) + (r["admin"] or 0)
+    if total > a.max_total:
+        return False
+    if r["tub_status"] not in a.tub:
+        return False
+    if r["walk_min"] is None:
+        if not a.allow_unknown_walk:
+            return False
+    elif r["walk_min"] > a.walk_max:
+        return False
+    return (r["area"] or 0) >= a.min_area
+
+
+def _score_row(r, a):
+    """1行を実質費用計算・スコアリングし hit タプルを返す。
+
+    シャワー候補絞り込みに該当しなければ None。
+    """
+    total = (r["rent"] or 0) + (r["admin"] or 0)
+    nonrefund = (r["km"] or 0) + (r["ag"] or 0) + (r["gf"] or 0) \
+        + (r["ins"] or 0) + (r["kx"] or 0) + (r["cl"] or 0)
+    init_total = nonrefund + (r["dep"] or 0)
+    fetched = r["fetched"] if "fetched" in r.keys() else 0  # noqa: SIM118
+    eff = effective_monthly(r["rent"], r["admin"], r["water"],
+                            guarantee_renew=r["gren"], renewal_fee=r["rf"],
+                            contract_months=r["cm"] or 24,
+                            nonrefund_init=nonrefund,
+                            support_monthly=r["supm"],
+                            renewal_admin_fee=r["raf"])
+    t2 = total_2year(r["rent"], r["admin"], init_total=init_total,
+                     renewal_fee=r["rf"], guarantee_renew=r["gren"],
+                     free_months=r["fr"], support_once=r["sup"],
+                     support_monthly=r["supm"], contract_months=r["cm"],
+                     renewal_admin_fee=r["raf"])
+    missing = r["walk_min"] is None or not r["ev"]
+    shower = r["tub_status"] == "unknown" \
+        and is_shower_candidate(r["equip"] or "")
+    if a.shower_only and not shower:
+        return None
+    sc, reasons = score_unit({"total": total,
+                              "tub_status": r["tub_status"],
+                              "walk_min": r["walk_min"], "area": r["area"],
+                              "floor": r["floor"],
+                              "equip": r["equip"] or "",
+                              "autolock": bool(r["autolock"]),
+                              "missing": missing})
+    return (sc, eff, dict(r) | {"total": total, "t2": t2,
+                                "init": init_total, "reasons": reasons,
+                                "fetched": fetched, "shower": shower})
+
+
 def collect_hits(a):
     """active listing をフィルタ・スコアリングし hits を返す。
 
-    hits: [(score, 実質月額, 行dict), ...] スコア降順・同点は実質月額降順。
+    hits: [(score, 実質月額, 行dict), ...] スコア降順・同点は実質月額昇順。
+    絞り込みは _passes_filters、採点は _score_row に分離してある
+    （SQL と実行順は旧実装と同一）。
     """
     con = sqlite3.connect(DB)
     try:
@@ -56,50 +111,11 @@ def collect_hits(a):
         con.close()
     hits = []
     for r in rows:
-        total = (r["rent"] or 0) + (r["admin"] or 0)
-        if total > a.max_total:
+        if not _passes_filters(r, a):
             continue
-        if r["tub_status"] not in a.tub:
-            continue
-        if r["walk_min"] is None:
-            if not a.allow_unknown_walk:
-                continue
-        elif r["walk_min"] > a.walk_max:
-            continue
-        if (r["area"] or 0) < a.min_area:
-            continue
-        nonrefund = (r["km"] or 0) + (r["ag"] or 0) + (r["gf"] or 0) \
-            + (r["ins"] or 0) + (r["kx"] or 0) + (r["cl"] or 0)
-        init_total = nonrefund + (r["dep"] or 0)
-        fetched = r["fetched"] if "fetched" in r.keys() else 0  # noqa: SIM118
-        eff = effective_monthly(r["rent"], r["admin"], r["water"],
-                                guarantee_renew=r["gren"], renewal_fee=r["rf"],
-                                contract_months=r["cm"] or 24,
-                                nonrefund_init=nonrefund,
-                                support_monthly=r["supm"],
-                                renewal_admin_fee=r["raf"])
-        t2 = total_2year(r["rent"], r["admin"], init_total=init_total,
-                         renewal_fee=r["rf"], guarantee_renew=r["gren"],
-                         free_months=r["fr"], support_once=r["sup"],
-                         support_monthly=r["supm"], contract_months=r["cm"],
-                         renewal_admin_fee=r["raf"])
-        missing = r["walk_min"] is None or not r["ev"]
-        shower = r["tub_status"] == "unknown" \
-            and is_shower_candidate(r["equip"] or "")
-        if a.shower_only and not shower:
-            continue
-        sc, reasons = score_unit({"total": total,
-                                  "tub_status": r["tub_status"],
-                                  "walk_min": r["walk_min"], "area": r["area"],
-                                  "floor": r["floor"],
-                                  "equip": r["equip"] or "",
-                                  "autolock": bool(r["autolock"]),
-                                  "missing": missing})
-        hits.append((sc, eff, dict(r) | {"total": total, "t2": t2,
-                                         "init": init_total,
-                                         "reasons": reasons,
-                                         "fetched": fetched,
-                                         "shower": shower}))
+        hit = _score_row(r, a)
+        if hit is not None:
+            hits.append(hit)
     hits.sort(key=lambda x: (x[0], -x[1]), reverse=True)
     return hits
 
