@@ -72,10 +72,11 @@ def _equipment_text(soup):
     return ""
 
 
-def parse_detail(soup):
-    """詳細ページ -> dict（欠落はNone）。"""
-    info = soup.select_one(".property_view_note-info") \
-        or soup.select_one(".property_view_note")
+def _parse_price_note(info):
+    """価格ブロック (.property_view_note-info) を行単位で分解する。
+
+    -> (price dict, 価格メモ全文)
+    """
     price_note = nfkc(info.get_text(" ")) if info else ""
     price = {"rent": None, "admin": None, "deposit": None, "key_money": None,
              "hoshoukin": None, "shoukyaku": None, "agency_raw": None}
@@ -106,18 +107,13 @@ def parse_detail(soup):
                 price["agency_raw"] = line.split(":", 1)[-1]
             elif price["rent"] is None and ("万円" in line or "円" in line):
                 price["rent"] = to_yen(line)
+    return price, price_note
 
-    g = _table_map(soup.select_one("table.table_gaiyou"))
-    acc = _table_map(soup.select_one(".property_view_table"))
-    full = nfkc(soup.get_text(" ", strip=True))
-    equipment = _equipment_text(soup)
 
-    other = g.get("ほか初期費用") or g.get("ほか諸費用") or ""
-    rent = price["rent"]
-    contract = g.get("契約期間") or ""
-    # 契約期間のパース: 「2028年3月末まで」のような定期借家の期限
-    # （西暦）を期間と誤認しないよう、大きな年数は除外する
-    # （誤認すると contract_months が 24336 のような値になった）。
+def _parse_contract_months(contract):
+    """契約期間のパース: 「2028年3月末まで」のような定期借家の期限
+    （西暦）を期間と誤認しないよう、大きな年数は除外する
+    （誤認すると contract_months が 24336 のような値になった）。"""
     months = None
     for m in re.finditer(r"(\d+)\s*年", contract):
         yrs = int(m.group(1))
@@ -130,9 +126,16 @@ def parse_detail(soup):
             if mm:
                 months += int(mm.group(1))
             break
-    # 保証会社の更新料と契約の更新料は別物。従来は両列に同じ値を
-    # 入れていたため実質月額で二重計上されていた。どちらも
-    # 「賃料の1ヶ月分」等の比率表記が多いため _labeled_yen で拾う。
+    return months
+
+
+def _parse_renewal_fees(g, other, contract, rent):
+    """保証更新料・更新料・更新事務手数料をラベル近傍から読む。
+
+    保証会社の更新料と契約の更新料は別物。従来は両列に同じ値を
+    入れていたため実質月額で二重計上されていた。どちらも
+    「賃料の1ヶ月分」等の比率表記が多いため _labeled_yen で拾う。
+    """
     guarantee_renew_yen = _labeled_yen(g.get("保証会社") or "",
                                        r"更新料", rent)
     if guarantee_renew_yen is None:
@@ -157,24 +160,19 @@ def parse_detail(soup):
     if renewal_admin_fee_yen is not None and rent \
             and renewal_admin_fee_yen > rent * 3:
         renewal_admin_fee_yen = None
-    admin = price["admin"]
-    if rent and admin and admin > rent:
-        admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
-    # 敷金・礼金等の異常値ガード: 仲介側が円額を万円欄に入力した
-    # ケース（実例「敷金: 435600万円」=43.5億円、家賃6.6万円）を通さない。
-    # 住宅の敷金・礼金・保証金は通常0〜数ヶ月分で、12ヶ月分超は誤記。
-    if rent:
-        for key in ("deposit", "key_money", "hoshoukin", "shoukyaku"):
-            price[key] = _guard_rent_multiple(price[key], rent)
+    return guarantee_renew_yen, renewal_fee_yen, renewal_admin_fee_yen
 
-    key_exchange_yen = _find_yen(other, r"鍵交換")
-    cleaning_yen = _cleaning_yen(other)
-    support_yen, support_monthly_yen = _support_fees(other)
-    # 「合計X万円（内訳：…）」形式では各項目は合計以下のはず。
-    # 商品名末尾の数字と金額が連結した誤読（実例「アクト安心ライフ24
-    # 1.65万円」が分離されず 241.65万円 になる）では項目が合計を
-    # 超えるため、合計を超えた項目は捨てる。サポート費は合計が
-    # 取れない場合でも10万円超を実勢外として捨てる。
+
+def _cap_initial_fees(other, key_exchange, cleaning, support_once,
+                      support_monthly):
+    """ほか初期費用の各項目に上限を適用する。
+
+    「合計X万円（内訳：…）」形式では各項目は合計以下のはず。
+    商品名末尾の数字と金額が連結した誤読（実例「アクト安心ライフ24
+    1.65万円」が分離されず 241.65万円 になる）では項目が合計を
+    超えるため、合計を超えた項目は捨てる。サポート費は合計が
+    取れない場合でも10万円超を実勢外として捨てる。
+    """
     total_m = re.match(r"合計\s*([\d,]+(?:\.\d+)?\s*万円|[\d,]+\s*円)",
                        nfkc(other or ""))
     other_total = to_yen(total_m.group(1)) if total_m else None
@@ -188,21 +186,61 @@ def parse_detail(soup):
             return None
         return v
 
-    key_exchange_yen = _cap_fee(key_exchange_yen)
-    cleaning_yen = _cap_fee(cleaning_yen)
-    support_yen = _cap_fee(support_yen, cap=100000)
     # 月額型は初期費用の「合計」の内訳ではないため合計ガードは
     # 掛けず、上限だけを適用する
-    support_monthly_yen = _cap_fee(support_monthly_yen, cap=100000,
-                                   check_total=False)
+    return (_cap_fee(key_exchange), _cap_fee(cleaning),
+            _cap_fee(support_once, cap=100000),
+            _cap_fee(support_monthly, cap=100000, check_total=False))
 
-    # 取扱店舗（掲載仲介）。listings.agent の帰属用（F10）。
-    # 表示文字列は「店舗名(株)会社名」「会社名(株)店舗名」など
-    # 順序の表記ゆれがあるため、分割せず表示のまま保持する。
+
+def _parse_agent(soup):
+    """取扱店舗（掲載仲介）。listings.agent の帰属用（F10）。
+
+    表示文字列は「店舗名(株)会社名」「会社名(株)店舗名」など
+    順序の表記ゆれがあるため、分割せず表示のまま保持する。
+    """
     agent_el = soup.select_one(".viewform_advance_shop-name")
     agent = nfkc(agent_el.get_text(strip=True)) if agent_el else None
-    if not agent:
-        agent = None
+    return agent or None
+
+
+def parse_detail(soup):
+    """詳細ページ -> dict（欠落はNone）。
+
+    176行あった本体は価格メモ/契約月数/更新料系/初期費用上限/
+    取扱店舗のヘルパーへ分解した（実行順と判定は旧実装と同一）。
+    """
+    info = soup.select_one(".property_view_note-info") \
+        or soup.select_one(".property_view_note")
+    price, price_note = _parse_price_note(info)
+
+    g = _table_map(soup.select_one("table.table_gaiyou"))
+    acc = _table_map(soup.select_one(".property_view_table"))
+    full = nfkc(soup.get_text(" ", strip=True))
+    equipment = _equipment_text(soup)
+
+    other = g.get("ほか初期費用") or g.get("ほか諸費用") or ""
+    rent = price["rent"]
+    contract = g.get("契約期間") or ""
+    months = _parse_contract_months(contract)
+    (guarantee_renew_yen, renewal_fee_yen,
+     renewal_admin_fee_yen) = _parse_renewal_fees(g, other, contract, rent)
+    admin = price["admin"]
+    if rent and admin and admin > rent:
+        admin = None  # 一覧側と同じ異常値ガード（管理費>家賃は誤読）
+    # 敷金・礼金等の異常値ガード: 仲介側が円額を万円欄に入力した
+    # ケース（実例「敷金: 435600万円」=43.5億円、家賃6.6万円）を通さない。
+    # 住宅の敷金・礼金・保証金は通常0〜数ヶ月分で、12ヶ月分超は誤記。
+    if rent:
+        for key in ("deposit", "key_money", "hoshoukin", "shoukyaku"):
+            price[key] = _guard_rent_multiple(price[key], rent)
+
+    support_yen, support_monthly_yen = _support_fees(other)
+    key_exchange_yen, cleaning_yen, support_yen, support_monthly_yen = \
+        _cap_initial_fees(other, _find_yen(other, r"鍵交換"),
+                          _cleaning_yen(other), support_yen,
+                          support_monthly_yen)
+    agent = _parse_agent(soup)
 
     direction = acc.get("向き")
     if direction is not None and nfkc(direction).strip() in _DASH:
