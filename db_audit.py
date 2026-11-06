@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 from db import DB
+from models import is_shower_candidate
 
 COST_COLS = ["key_money_yen", "deposit_yen", "agency_yen",
              "guarantee_first_yen", "guarantee_renew_yen", "insurance_yen",
@@ -28,60 +29,65 @@ COST_COLS = ["key_money_yen", "deposit_yen", "agency_yen",
              "free_rent_months"]
 
 
-def audit(db_path, max_total=100000, walk_max=10, stale_days=7):
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    con.row_factory = sqlite3.Row
+def _one(con, sql, args=()):
+    try:
+        return con.execute(sql, args).fetchone()[0]
+    except sqlite3.Error as e:
+        return f"ERR: {e}"
 
-    def one(sql, args=()):
-        try:
-            return con.execute(sql, args).fetchone()[0]
-        except sqlite3.Error as e:
-            return f"ERR: {e}"
 
-    def rows(sql, args=()):
-        try:
-            return [dict(r) for r in con.execute(sql, args)]
-        except sqlite3.Error as e:
-            return [f"ERR: {e}"]
+def _rows(con, sql, args=()):
+    try:
+        return [dict(r) for r in con.execute(sql, args)]
+    except sqlite3.Error as e:
+        return [f"ERR: {e}"]
 
-    out = {}
-    tables = ["buildings", "units", "listings", "properties", "costs",
-              "stations", "evidence", "listing_snapshots", "amenities"]
-    out["counts"] = {t: one(f"SELECT COUNT(*) FROM {t}") for t in tables}
 
-    # --- 重複 ---
-    out["duplicates"] = {
-        "listings_url_groups": one(
-            "SELECT COUNT(*) FROM (SELECT url FROM listings"
-            " GROUP BY url HAVING COUNT(*)>1)"),
-        "properties_url_groups": one(
-            "SELECT COUNT(*) FROM (SELECT detail_url FROM properties"
-            " GROUP BY detail_url HAVING COUNT(*)>1)"),
-        "buildings_groups": one(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM buildings"
-            " GROUP BY norm_address, norm_name HAVING COUNT(*)>1)"),
-        "units_groups": one(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM units"
-            " GROUP BY building_id, layout, area_m2, floor HAVING COUNT(*)>1)"),
-        "stations_groups": one(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM stations"
-            " GROUP BY unit_id, name, line HAVING COUNT(*)>1)"),
+_TABLES = ["buildings", "units", "listings", "properties", "costs",
+           "stations", "evidence", "listing_snapshots", "amenities"]
+
+
+def _audit_counts(con):
+    return {t: _one(con, f"SELECT COUNT(*) FROM {t}") for t in _TABLES}
+
+
+def _audit_duplicates(con):
+    return {
+        "listings_url_groups": _one(
+            con, "SELECT COUNT(*) FROM (SELECT url FROM listings"
+                 " GROUP BY url HAVING COUNT(*)>1)"),
+        "properties_url_groups": _one(
+            con, "SELECT COUNT(*) FROM (SELECT detail_url FROM properties"
+                 " GROUP BY detail_url HAVING COUNT(*)>1)"),
+        "buildings_groups": _one(
+            con, "SELECT COUNT(*) FROM (SELECT 1 FROM buildings"
+                 " GROUP BY norm_address, norm_name HAVING COUNT(*)>1)"),
+        "units_groups": _one(
+            con, "SELECT COUNT(*) FROM (SELECT 1 FROM units"
+                 " GROUP BY building_id, layout, area_m2, floor"
+                 " HAVING COUNT(*)>1)"),
+        "stations_groups": _one(
+            con, "SELECT COUNT(*) FROM (SELECT 1 FROM stations"
+                 " GROUP BY unit_id, name, line HAVING COUNT(*)>1)"),
     }
 
-    # --- 不足: 詳細取得 ---
-    total_listings = out["counts"]["listings"] or 0
-    fetched = one("SELECT COUNT(*) FROM costs WHERE fetched=1") or 0
+
+def _audit_detail_coverage(con, counts, max_total, walk_max):
+    """詳細取得の網羅率と、初期費用の NULL 率 (fetched=1 行) を返す。"""
+    fetched = _one(con, "SELECT COUNT(*) FROM costs WHERE fetched=1") or 0
     cand_sql = (
         "FROM listings l JOIN units u ON u.id=l.unit_id"
         " LEFT JOIN costs c ON c.listing_id=l.id"
         " WHERE l.active=1 AND l.rent_yen + l.admin_yen <= ?"
         " AND EXISTS (SELECT 1 FROM stations s WHERE s.unit_id=u.id"
         "             AND s.walk_min<=?)")
-    cand_total = one(f"SELECT COUNT(*) {cand_sql}", (max_total, walk_max)) or 0
-    cand_fetched = one(
-        f"SELECT COUNT(*) {cand_sql} AND COALESCE(c.fetched,0)=1",
+    cand_total = _one(con, f"SELECT COUNT(*) {cand_sql}",
+                      (max_total, walk_max)) or 0
+    cand_fetched = _one(
+        con, f"SELECT COUNT(*) {cand_sql} AND COALESCE(c.fetched,0)=1",
         (max_total, walk_max)) or 0
-    out["detail_coverage"] = {
+    total_listings = counts["listings"] or 0
+    detail_coverage = {
         "listings": total_listings,
         "fetched": fetched,
         "fetched_rate": round(fetched / total_listings, 4)
@@ -92,73 +98,116 @@ def audit(db_path, max_total=100000, walk_max=10, stale_days=7):
         if cand_total else None,
         "candidate_backlog": cand_total - cand_fetched,
     }
-    out["cost_null_rate_fetched"] = {
-        col: (round(one(
-            f"SELECT COUNT(*) FROM costs WHERE fetched=1 AND {col} IS NULL")
+    cost_null_rate = {
+        col: (round(_one(
+            con, f"SELECT COUNT(*) FROM costs WHERE fetched=1"
+                 f" AND {col} IS NULL")
             / fetched, 4) if fetched else None)
         for col in COST_COLS
     }
-    out["tub_status"] = rows(
-        "SELECT tub_status, COUNT(*) n FROM units GROUP BY 1 ORDER BY 2 DESC")
-    n_units = out["counts"]["units"] or 0
-    unknown = one("SELECT COUNT(*) FROM units WHERE tub_status='unknown'") or 0
-    out["tub_unknown_rate"] = round(unknown / n_units, 4) if n_units else None
-    out["properties_has_bathtub_null"] = one(
-        "SELECT COUNT(*) FROM properties WHERE has_bathtub IS NULL")
-    out["evidence_units"] = one(
-        "SELECT COUNT(DISTINCT unit_id) FROM evidence")
-    out["amenities_units"] = one(
-        "SELECT COUNT(DISTINCT unit_id) FROM amenities")
-    out["units_without_station"] = one(
-        "SELECT COUNT(*) FROM units u LEFT JOIN stations s"
-        " ON s.unit_id=u.id WHERE s.id IS NULL")
+    return detail_coverage, cost_null_rate
 
-    # --- 陳腐化・混入 ---
-    out["stale_active"] = one(
-        "SELECT COUNT(*) FROM listings WHERE active=1"
-        " AND last_seen < datetime('now',?)",
-        (f"-{stale_days} days",))
-    out["last_seen_by_date"] = rows(
-        "SELECT date(last_seen) d, COUNT(*) n FROM listings"
-        " GROUP BY 1 ORDER BY 1")
-    out["rent_over_cap"] = one(
-        "SELECT COUNT(*) FROM listings WHERE rent_yen > ?", (max_total,))
-    out["total_over_cap"] = one(
-        "SELECT COUNT(*) FROM listings"
-        " WHERE rent_yen + admin_yen > ?", (max_total,))
 
-    # --- シャワー候補（手動確認バケット） ---
-    # tub_status が unknown のままの unit のうち、設備文にシャワー
-    # 設備の言及があり湯船の証拠が無いもの。判定は変えず、目視で
-    # 確認すべき候補として列挙する。
-    from models import is_shower_candidate
+def _audit_tub(con, counts):
+    """湯船判定の分布・未知率と関連テーブルの網羅。"""
+    n_units = counts["units"] or 0
+    unknown = _one(con,
+                   "SELECT COUNT(*) FROM units WHERE tub_status='unknown'") \
+        or 0
+    return {
+        "tub_status": _rows(
+            con, "SELECT tub_status, COUNT(*) n FROM units"
+                 " GROUP BY 1 ORDER BY 2 DESC"),
+        "tub_unknown_rate": round(unknown / n_units, 4) if n_units else None,
+        "properties_has_bathtub_null": _one(
+            con, "SELECT COUNT(*) FROM properties WHERE has_bathtub IS NULL"),
+        "evidence_units": _one(
+            con, "SELECT COUNT(DISTINCT unit_id) FROM evidence"),
+        "amenities_units": _one(
+            con, "SELECT COUNT(DISTINCT unit_id) FROM amenities"),
+        "units_without_station": _one(
+            con, "SELECT COUNT(*) FROM units u LEFT JOIN stations s"
+                 " ON s.unit_id=u.id WHERE s.id IS NULL"),
+    }
+
+
+def _audit_freshness(con, max_total, stale_days):
+    """陳腐化・混入 (stale active / last_seen 分布 / 上限超過)。"""
+    return {
+        "stale_active": _one(
+            con, "SELECT COUNT(*) FROM listings WHERE active=1"
+                 " AND last_seen < datetime('now',?)",
+            (f"-{stale_days} days",)),
+        "last_seen_by_date": _rows(
+            con, "SELECT date(last_seen) d, COUNT(*) n FROM listings"
+                 " GROUP BY 1 ORDER BY 1"),
+        "rent_over_cap": _one(
+            con, "SELECT COUNT(*) FROM listings WHERE rent_yen > ?",
+            (max_total,)),
+        "total_over_cap": _one(
+            con, "SELECT COUNT(*) FROM listings"
+                 " WHERE rent_yen + admin_yen > ?", (max_total,)),
+    }
+
+
+def _audit_shower_candidates(con):
+    """シャワー候補（手動確認バケット）。
+
+    tub_status が unknown のままの unit のうち、設備文にシャワー
+    設備の言及があり湯船の証拠が無いもの。判定は変えず、目視で
+    確認すべき候補として列挙する。
+    """
     cand = {}
-    for r in rows(
-            "SELECT u.id unit_id, b.name building, l.url, p.equipment"
-            " FROM units u JOIN listings l ON l.unit_id = u.id"
-            " JOIN properties p ON p.detail_url = l.url"
-            " JOIN buildings b ON b.id = u.building_id"
-            " WHERE u.tub_status = 'unknown'"
-            " AND p.equipment IS NOT NULL AND p.equipment != ''"):
+    for r in _rows(
+            con, "SELECT u.id unit_id, b.name building, l.url, p.equipment"
+                 " FROM units u JOIN listings l ON l.unit_id = u.id"
+                 " JOIN properties p ON p.detail_url = l.url"
+                 " JOIN buildings b ON b.id = u.building_id"
+                 " WHERE u.tub_status = 'unknown'"
+                 " AND p.equipment IS NOT NULL AND p.equipment != ''"):
         if r["unit_id"] in cand:
             continue
         if is_shower_candidate(r["equipment"]):
             cand[r["unit_id"]] = {"unit_id": r["unit_id"],
-                                   "building": r["building"],
-                                   "url": r["url"]}
-    out["shower_candidates"] = list(cand.values())
-    out["shower_candidate_count"] = len(cand)
+                                  "building": r["building"],
+                                  "url": r["url"]}
+    return {"shower_candidates": list(cand.values()),
+            "shower_candidate_count": len(cand)}
 
-    # --- 管理費の掲載ミス疑い ---
-    # SUUMO 側の入力ミス（管理費が家賃の半分以上）が parser を素通り
-    # して総額を押し上げ、候補から静かに脱落する。値を直すことは
-    # できないため、疑いとして列挙して目視確認に回す。
-    out["admin_suspect"] = rows(
-        "SELECT name, rent_yen, admin_yen, total_yen, detail_url"
-        " FROM properties WHERE rent_yen > 0"
-        " AND admin_yen >= rent_yen * 0.5 ORDER BY admin_yen DESC")
-    con.close()
-    return out
+
+def _audit_admin_suspect(con):
+    """管理費の掲載ミス疑い。
+
+    SUUMO 側の入力ミス（管理費が家賃の半分以上）が parser を素通り
+    して総額を押し上げ、候補から静かに脱落する。値を直すことは
+    できないため、疑いとして列挙して目視確認に回す。
+    """
+    return {"admin_suspect": _rows(
+        con, "SELECT name, rent_yen, admin_yen, total_yen, detail_url"
+             " FROM properties WHERE rent_yen > 0"
+             " AND admin_yen >= rent_yen * 0.5 ORDER BY admin_yen DESC")}
+
+
+def audit(db_path, max_total=100000, walk_max=10, stale_days=7):
+    """DB の過不足を数値で洗い出す。131行あった本体は
+    セクション別の _audit_* ヘルパーへ分解した（クエリは同一）。"""
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    try:
+        counts = _audit_counts(con)
+        detail_coverage, cost_null = _audit_detail_coverage(
+            con, counts, max_total, walk_max)
+        out = {"counts": counts,
+               "duplicates": _audit_duplicates(con),
+               "detail_coverage": detail_coverage,
+               "cost_null_rate_fetched": cost_null}
+        out.update(_audit_tub(con, counts))
+        out.update(_audit_freshness(con, max_total, stale_days))
+        out.update(_audit_shower_candidates(con))
+        out.update(_audit_admin_suspect(con))
+        return out
+    finally:
+        con.close()
 
 
 def main():
