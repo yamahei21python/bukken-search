@@ -37,8 +37,12 @@ class TestBuildSite(unittest.TestCase):
         self.assertIsNotNone(d["meta"]["r2"])
         self.assertEqual(len(d["rows"]), d["meta"]["rows"])
         row = d["rows"][0]
-        for key in ("n", "st", "w", "tot", "fair", "disc", "tub", "url"):
+        for key in ("n", "st", "w", "tot", "fair", "disc", "url"):
             self.assertIn(key, row)
+        # プライバシー: 湯船判定は検索戦略が推測できるため
+        # 公開データには絶対に含めない (UI でも非表示)
+        self.assertNotIn("tub", row)
+        self.assertNotIn("has_bathtub", row)
         # 割安度順でソート済み (降順)
         discs = [r["disc"] or 0 for r in d["rows"]]
         self.assertEqual(discs, sorted(discs, reverse=True))
@@ -48,6 +52,9 @@ class TestBuildSite(unittest.TestCase):
         self.assertIn("阿波座 賃貸選別", html)
         self.assertIn("data.json", html)
         self.assertIn("leaflet", html.lower())
+        # プライバシー: 湯船関連 UI は公開サイトに載せない
+        for ng in ("湯船", "湯なし", "tub"):
+            self.assertNotIn(ng, html)
 
     def test_output_size_reasonable(self):
         d = Path(self.tmp.name) / "data.json"
