@@ -157,6 +157,10 @@ td.url a{color:#0d5bd8}
   <label>徒歩 <input type="number" id="f_walk" value="10" min="1" max="20"
     style="width:52px" oninput="render()">分</label>
   <label><input type="checkbox" id="f_eff">実質月額あるのみ</label>
+  <span id="f_layouts"></span>
+  <span id="f_stations"></span>
+  <label>築 <input type="number" id="f_age" placeholder="上限" min="0"
+    max="60" style="width:56px" oninput="render()">年以内</label>
   <label>検索 <input type="text" id="f_q" oninput="render()"
     placeholder="建物名・設備"></label>
   <span>ソート:
@@ -194,6 +198,25 @@ fetch("data.json").then(r => r.json()).then(d => {
   document.getElementById("meta").textContent =
     `生成 ${d.generated_at} / 母数 ${d.meta.rows.toLocaleString()} 件 / `
     + `モデル CV R2=${(d.meta.r2 ?? 0).toFixed(3)} MAE=${Math.round(d.meta.mae_yen ?? 0).toLocaleString()}円`;
+  const freq = {};
+  for (const r of d.rows) {
+    const k = r.l || "";
+    if (k) freq[k] = (freq[k] || 0) + 1;
+  }
+  const layouts = Object.keys(freq).sort((a, b) => freq[b] - freq[a]);
+  document.getElementById("f_layouts").innerHTML = layouts.map(l =>
+    `<label style="margin-right:6px"><input type="checkbox"
+      class="f_lo" value="${l}">${l}</label>`).join("");
+  const sfreq = {};
+  for (const r of d.rows) {
+    const k = r.st || "";
+    if (k) sfreq[k] = (sfreq[k] || 0) + 1;
+  }
+  const stations = Object.keys(sfreq).sort((a, b) => sfreq[b] - sfreq[a]);
+  document.getElementById("f_stations").innerHTML =
+    `<b style="opacity:.7">駅:</b>` + stations.map(st =>
+      `<label style="margin-right:6px"><input type="checkbox"
+        class="f_st" value="${st}">${st}</label>`).join("");
   render();
   initMap();
 });
@@ -219,9 +242,20 @@ function filtered() {
   const effOnly = document.getElementById("f_eff").checked;
   const q = document.getElementById("f_q").value.trim();
   const sort = document.getElementById("f_sort").value;
+  // 間取り・駅: チェックが1つも無ければ全件
+  const loSel = [...document.querySelectorAll(".f_lo:checked")]
+    .map(x => x.value);
+  const stSel = [...document.querySelectorAll(".f_st:checked")]
+    .map(x => x.value);
+  // 築年数上限 (空欄なら無制限)。築年数不明の行は上限設定時に除外
+  const ageMax = document.getElementById("f_age").value;
+  const age = ageMax === "" ? null : +ageMax;
   let rows = DATA.rows.filter(r =>
     r.tot <= tot && r.w != null && r.w <= walk
     && (!effOnly || r.eff != null)
+    && (loSel.length === 0 || loSel.includes(r.l))
+    && (stSel.length === 0 || stSel.includes(r.st))
+    && (age === null || (r.y != null && r.y <= age))
     && (!q || (r.n + r.eq + r.st).includes(q)));
   const key = sort === "disc" ? "disc" : sort;
   rows.sort((a, b) => (b[key] ?? -1) - (a[key] ?? -1));
@@ -345,15 +379,11 @@ function drawMap() {
       .addTo(LAYER);
   }
 }
-document.getElementById("f_eff").addEventListener("change", () => {
+document.getElementById("filters").addEventListener("change", () => {
   render();
   drawMap();
 });
-document.getElementById("f_limit").addEventListener("change", () => {
-  render();
-  drawMap();
-});
-document.getElementById("f_sort").addEventListener("change", () => {
+document.getElementById("f_q").addEventListener("input", () => {
   render();
   drawMap();
 });
