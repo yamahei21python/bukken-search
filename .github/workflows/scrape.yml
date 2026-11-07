@@ -119,6 +119,18 @@ jobs:
           git push --force origin "$commit:refs/heads/gh-pages"
           rm -f "$GIT_INDEX_FILE"
 
+      # Vercel へも自動デプロイ (VERCEL_TOKEN を設定した場合のみ)。
+      # orgId/projectId は機密ではないため直書き (site/.vercel と同じ値)。
+      - name: Deploy to Vercel (optional)
+        if: ${{ env.HAS_VERCEL_TOKEN == 'true' }}
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          mkdir -p site/.vercel
+          printf '{"projectId":"prj_YveG0lynLS75UAIR4MO8ernveLlX","orgId":"team_1VCpA0lEfBd9ZEB9OPRF2yfC"}' > site/.vercel/project.json
+          npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN" --cwd site
+
       - name: Notify (optional)
         if: ${{ env.HAS_WEBHOOK == 'true' }}
         env:
