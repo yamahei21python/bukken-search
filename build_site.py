@@ -165,21 +165,9 @@ td.url a{color:#0d5bd8}
 <div id="filters">
   <label>総額上限 <input type="range" id="f_tot" min="50000" max="100000"
     step="5000" value="100000" oninput="render()"><span id="f_tot_v"></span></label>
-  <label>徒歩 <select id="f_walk">
-    <option value="">指定なし</option>
-    <option value="3">3分以内</option>
-    <option value="5">5分以内</option>
-    <option value="7">7分以内</option>
-    <option value="10" selected>10分以内</option>
-    <option value="15">15分以内</option>
-  </select></label>
   <div class="dd">
     <button type="button" class="dd-btn" id="dd_lo_btn">間取り ▾</button>
     <div class="dd-panel" id="f_layouts"></div>
-  </div>
-  <div class="dd">
-    <button type="button" class="dd-btn" id="dd_st_btn">駅 ▾</button>
-    <div class="dd-panel" id="f_stations"></div>
   </div>
   <label>築 <select id="f_age">
     <option value="">指定なし</option>
@@ -189,6 +177,18 @@ td.url a{color:#0d5bd8}
     <option value="20">20年以内</option>
     <option value="25">25年以内</option>
     <option value="30">30年以内</option>
+  </select></label>
+  <div class="dd">
+    <button type="button" class="dd-btn" id="dd_st_btn">駅 ▾</button>
+    <div class="dd-panel" id="f_stations"></div>
+  </div>
+  <label>徒歩 <select id="f_walk">
+    <option value="">指定なし</option>
+    <option value="3">3分以内</option>
+    <option value="5">5分以内</option>
+    <option value="7">7分以内</option>
+    <option value="10" selected>10分以内</option>
+    <option value="15">15分以内</option>
   </select></label>
   <span>ソート:
     <select id="f_sort" onchange="render()">
