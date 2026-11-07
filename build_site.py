@@ -13,6 +13,7 @@ main への push (毎朝のスクレイプ) で Vercel が自動更新する。
 """
 import json
 import math
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +22,12 @@ import pandas as pd
 import app_data
 
 OUT = Path(__file__).parent / "site"
+
+# Google Maps JavaScript API のキー (任意)。
+# 設定があれば普段使いの Google マップで描画し、無ければ Leaflet (OSM)。
+# キーは GCP で発行し、HTTP リファラー制限 (自分の Vercel ドメイン等)
+# を掛けてから使う (静的サイトでは HTML に含まれるため必ず制限する)。
+GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 
 
 def _num(v):
@@ -73,7 +80,8 @@ def build(out_dir=OUT):
     out_dir.mkdir(exist_ok=True)
     (out_dir / "data.json").write_text(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-    (out_dir / "index.html").write_text(_TEMPLATE)
+    (out_dir / "index.html").write_text(
+        _TEMPLATE.replace("__GKEY__", GOOGLE_MAPS_API_KEY))
     print(f"site: {len(rows)} rows -> {out_dir/'data.json'}"
           f" ({(out_dir/'data.json').stat().st_size / 1e6:.1f}MB)")
     return len(rows)
@@ -86,6 +94,7 @@ _TEMPLATE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>阿波座 賃貸選別 (静的版)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script>window.GKEY = "__GKEY__";</script>
 <style>
 body{font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;
   margin:0;background:#f6f7f9;color:#1c2430}
@@ -154,7 +163,8 @@ td.url a{color:#0d5bd8}
 詳細は SUUMO リンクで確認。</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-let DATA, MAP, LAYER;
+let DATA, MAP, LAYER, GMAP, GMARKERS, IW;
+let PROVIDER = null;
 fetch("data.json").then(r => r.json()).then(d => {
   DATA = d;
   document.getElementById("meta").textContent =
@@ -163,6 +173,15 @@ fetch("data.json").then(r => r.json()).then(d => {
   render();
   initMap();
 });
+function __gmCb() {
+  PROVIDER = "g";
+  GMAP = new google.maps.Map(document.getElementById("map"),
+    {center: {lat: 34.6815, lng: 135.4953}, zoom: 13,
+     mapTypeControl: false, streetViewControl: false});
+  GMARKERS = [];
+  IW = new google.maps.InfoWindow();
+  drawMap();
+}
 function tab(t) {
   document.getElementById("tab_t").classList.toggle("on", t === "t");
   document.getElementById("tab_m").classList.toggle("on", t === "m");
@@ -217,33 +236,73 @@ function render() {
   }
 }
 function initMap() {
+  if (window.GKEY) {
+    // Google Maps (普段使いの見た目)。キーはビルド時に注入。
+    PROVIDER = "g-loading";
+    const sc = document.createElement("script");
+    sc.src = "https://maps.googleapis.com/maps/api/js?key="
+      + encodeURIComponent(window.GKEY)
+      + "&callback=__gmCb&loading=async";
+    sc.async = true;
+    document.head.appendChild(sc);
+    return;
+  }
+  PROVIDER = "osm";
   MAP = L.map("map").setView([34.6815, 135.4953], 13);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     {attribution: "© OpenStreetMap"}).addTo(MAP);
   LAYER = L.layerGroup().addTo(MAP);
   drawMap();
 }
-function drawMap() {
-  if (!LAYER) return;
-  LAYER.clearLayers();
 
-  // 地図も「表示」セレクタの上位N件に連動 (全件だと重く視認性も低下)
+function discColor(t, light) {
+  return `hsl(${210 - 210 * t}, 70%, ${light ? 55 : 42}%)`;
+}
+function markerHTML(r) {
+  return `<div style="font-family:system-ui;font-size:13px">`
+    + `<b>${r.n}</b><br>割安 <b>${r.disc ?? "-"}%</b> `
+    + `(公正${r.fair ? (r.fair / 10000).toFixed(1) + "万" : "-"} /`
+    + ` 実${(r.tot / 10000).toFixed(1)}万)`
+    + `<br>${r.l} ${r.a}m2 ${r.st} 歩${r.w}分`
+    + `<br><a href="${r.url}" target="_blank" rel="noopener">SUUMO</a></div>`;
+}
+
+function drawMap() {
   const rows = displayed().filter(r => r.lat != null && r.lon != null);
   const discs = rows.map(r => r.disc ?? 0).sort((a, b) => a - b);
   const dmax = discs.length ? discs[Math.floor(discs.length * 0.95)] : 0;
   const scale = v => Math.max(0, Math.min(1, v / Math.max(dmax, 1)));
+  if (PROVIDER === "g") {
+    // Google Maps: 割安度で半径と色が変わる円 (メートル指定で
+    // ズームに応じてスケールする)
+    for (const m of GMARKERS) m.setMap(null);
+    GMARKERS = [];
+    for (const r of rows) {
+      const t = scale(r.disc ?? 0);
+      const c = new google.maps.Circle({
+        center: {lat: r.lat, lng: r.lon},
+        radius: 60 + 140 * t,
+        strokeColor: discColor(t, false),
+        fillColor: discColor(t, true), fillOpacity: .8, map: GMAP,
+        clickable: true});
+      c.addListener("click", () => {
+        IW.setContent(markerHTML(r));
+        IW.open({anchor: c, map: GMAP});
+      });
+      GMARKERS.push(c);
+    }
+    return;
+  }
+  if (PROVIDER !== "osm" || !LAYER) return;
+  LAYER.clearLayers();
   for (const r of rows) {
     const t = scale(r.disc ?? 0);
     // 割安度が高いほど赤く・大きく (青→赤のグラデーション)
     L.circleMarker([r.lat, r.lon], {radius: 4 + 7 * t,
-      color: `hsl(${210 - 210 * t}, 70%, 42%)`,
-      fillColor: `hsl(${210 - 210 * t}, 70%, 55%)`, fillOpacity: .8,
+      color: discColor(t, false),
+      fillColor: discColor(t, true), fillOpacity: .8,
       weight: 1})
-      .bindPopup(`<b>${r.n}</b><br>割安 <b>${r.disc ?? "-"}%</b> `
-        + `(公正${r.fair ? (r.fair / 10000).toFixed(1) + "万" : "-"} /`
-        + ` 実${(r.tot / 10000).toFixed(1)}万)`
-        + `<br>${r.l} ${r.a}m2 ${r.st} 歩${r.w}分`
-        + `<br><a href="${r.url}" target="_blank" rel="noopener">SUUMO</a>`)
+      .bindPopup(markerHTML(r))
       .addTo(LAYER);
   }
 }

@@ -104,6 +104,9 @@ jobs:
       # 静的サイト (Vercel / GitHub Pages) を gh-pages ブランチへ公開する。
       # main には site/ をコミットしない (1日5.9MBずつ増えるのを防ぐ)。
       - name: Build & publish static site (gh-pages)
+        env:
+          # 設定があれば Google マップで描画される (無ければ Leaflet)
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
           python3 build_site.py
           git config user.name "github-actions[bot]"
