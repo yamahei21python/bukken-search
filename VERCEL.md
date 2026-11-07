@@ -38,3 +38,17 @@ URL は `https://yamahei21python.github.io/bukken-search/`。
   Password Protection か GitHub Pages は private repo 不可に注意)
 - マップタイル (OpenStreetMap) と Leaflet は CDN から読む
 - data.json は約 6MB。初回読み込み後はブラウザキャッシュで高速
+
+## 任意: マップを Google マップにする
+
+Leaflet (OpenStreetMap) のままでも動くが、普段使いの見た目にしたい場合は
+Google Maps JavaScript API が使える (キー必須・無料枠で十分)。
+
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成
+2. 「Maps JavaScript API」を有効化
+3. 認証情報 → API キーを作成し、**HTTP リファラー制限**を設定
+   (`https://<あなたのプロジェクト>.vercel.app/*` と `http://localhost:8123/*`)
+   静的サイトは HTML にキーが含まれるため、この制限が必須
+4. リポジトリに登録: `gh secret set GOOGLE_MAPS_API_KEY`
+5. 次のスクレイプ (または手動で Scrape workflow 実行) から
+   Google マップで描画される。キーが無ければ自動で Leaflet にフォールバック
