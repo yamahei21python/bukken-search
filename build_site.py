@@ -106,7 +106,7 @@ header .meta{font-size:11px;opacity:.75}
   font-size:13px;position:sticky;top:0;z-index:900}
 #filters label{display:flex;gap:4px;align-items:center}
 #filters input[type=text]{width:140px}
-#tabs{display:flex;gap:8px;padding:8px 16px 0}
+#tabs{display:flex;justify-content:center;gap:8px;padding:8px 16px 0}
 #tabs button{border:1px solid #c9d2de;background:#fff;border-radius:6px;
   padding:6px 14px;font-size:13px;cursor:pointer}
 #tabs button.on{background:#0d2f5a;color:#fff;border-color:#0d2f5a}
@@ -160,7 +160,8 @@ td.url a{color:#0d5bd8}
   マップ: 表示件数セレクタに連動 (既定=割安上位100件)。
   割安度が高いほど大きく・赤く (青=低 → 赤=高。赤の上限は上位5%起点で自動調整)</div>
 <div id="hint">静的生成のため値下げ等の即時性はスクレイプ時点 (毎朝)。
-詳細は SUUMO リンクで確認。</div>
+建物名は SUUMO 掲載の見出し。建物名未登録の掲載は「路線 駅 N階建」
+形式で表示され、リンク先が同一建物の別部屋になることがある。</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 let DATA, MAP, LAYER, GMAP, GMARKERS, IW;
@@ -216,7 +217,7 @@ function render() {
   const thead = document.getElementById("tbl").tHead;
   thead.innerHTML = "<tr><th>割安%</th><th>総額</th><th>実質</th><th>2年</th>"
     + "<th>間取</th><th>面積</th><th>階</th><th>築</th><th>徒歩</th>"
-    + "<th>駅</th><th>建物</th><th>設備</th><th>リンク</th></tr>";
+    + "<th>駅</th><th>建物(リンク)</th><th>設備</th></tr>";
   const tb = document.getElementById("tbl").tBodies[0];
   const shown = displayed();
   tb.innerHTML = shown.map(r => {
@@ -226,8 +227,8 @@ function render() {
       + `<td>${r.t2 ? (r.t2 / 10000).toFixed(0) + "万" : "-"}</td>`
       + `<td>${r.l || "-"}</td><td>${r.a ?? "-"}</td><td>${r.f ?? "-"}</td>`
       + `<td>${r.y ?? "-"}</td><td>${r.w ?? "-"}</td><td>${r.st || "-"}</td>`
-      + `<td>${r.n}</td><td>${r.eq}</td>`
-      + `<td class="url"><a href="${r.url}" target="_blank" rel="noopener">SUUMO</a></td></tr>`;
+      + `<td class="url"><a href="${r.url}" target="_blank" rel="noopener">${r.n}</a></td>`
+      + `<td>${r.eq}</td></tr>`;
   }).join("");
   if (shown.length < rows.length) {
     tb.insertAdjacentHTML("beforeend",
@@ -260,11 +261,11 @@ function discColor(t, light) {
 }
 function markerHTML(r) {
   return `<div style="font-family:system-ui;font-size:13px">`
-    + `<b>${r.n}</b><br>割安 <b>${r.disc ?? "-"}%</b> `
+    + `<a href="${r.url}" target="_blank" rel="noopener"><b>${r.n}</b></a>`
+    + `<br>割安 <b>${r.disc ?? "-"}%</b> `
     + `(公正${r.fair ? (r.fair / 10000).toFixed(1) + "万" : "-"} /`
     + ` 実${(r.tot / 10000).toFixed(1)}万)`
-    + `<br>${r.l} ${r.a}m2 ${r.st} 歩${r.w}分`
-    + `<br><a href="${r.url}" target="_blank" rel="noopener">SUUMO</a></div>`;
+    + `<br>${r.l} ${r.a}m2 ${r.st} 歩${r.w}分</div>`;
 }
 
 function drawMap() {
