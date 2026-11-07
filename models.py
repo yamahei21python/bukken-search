@@ -133,6 +133,120 @@ def is_shower_candidate(text):
     return not any(k in t for k in tub_words)
 
 
+_RECONCILE_METHOD = "reconcile"
+
+
+def _reconcile_verdict(props):
+    """1 unit 分の properties 行から復元判定を作る。
+
+    props: [(has_bathtub, no_bathtub_evidence, equipment), ...]
+    -> (tub_status, confidence, quote) 情報が無ければ None。
+
+    evidence が失われた unit の復元なので、確定側には倒さず
+    likely 側 (conf 0.6) を基本とする。湯船なし確定の文言
+    (no_bathtub_evidence) が残っている場合だけ confirmed を許す。
+    複数仲介で判定が割れる場合は湯船側勝ち
+    (aggregate_tub_status と同じ規約)。
+    """
+    if not props:
+        return None
+    hbs = [p[0] for p in props]
+    if 1 in hbs:
+        quote = (next(p[2] for p in props if p[0] == 1) or "")[:400]
+        return "likely_tub", 0.6, quote
+    if any(h == 0 for h in hbs):
+        no_ev = next((p[1] for p in props
+                      if p[0] == 0 and p[1]), "")
+        if no_ev:
+            return "confirmed_no_tub", 0.95, no_ev[:400]
+        quote = (next((p[2] for p in props if p[0] == 0), "") or "")[:400]
+        return "likely_no_tub", 0.6, quote
+    return None
+
+
+def reconcile_tub(con):
+    """units.tub_status を evidence / properties から再構築する。
+
+    経緯: unit 融合合致の取り残しで listing を1つも持たない孤立
+    unit が残り、また evidence を持たない unknown unit が
+    properties.has_bathtub（最後の判定値）と矛盾して残っていた
+    （実測: 孤立 1,684件 / 矛盾 568件、unknown 率 24.1%）。
+
+    規約は変えない:
+      1. listing を持たない孤立 unit と付随行
+         (stations/amenities/evidence/favorites等) を削除
+      2. evidence がある unit は aggregate_tub_status で再集約
+         （evidence が審の上。現状と同一なら触れない）
+      3. evidence 無し unit は properties から判定を復元し、
+         method='reconcile' の evidence 行を残す
+         （再実行の安全性と来歴のため。idempotent）
+
+    -> レポート dict (deleted_units, reaggregated, restored, ...)
+    """
+    report = {"deleted_units": 0, "deleted_buildings": 0,
+              "reaggregated": 0, "restored": 0, "still_unknown": 0}
+
+    # 1. 孤立 unit 削除
+    orphans = [r[0] for r in con.execute(
+        "SELECT id FROM units u WHERE NOT EXISTS"
+        " (SELECT 1 FROM listings l WHERE l.unit_id=u.id)")]
+    if orphans:
+        marks = ",".join("?" * len(orphans))
+        for table in ("stations", "amenities", "evidence", "favorites",
+                      "viewings", "contacts"):
+            con.execute(f"DELETE FROM {table} WHERE unit_id IN ({marks})",
+                        orphans)
+        con.execute("DELETE FROM units WHERE id IN ({})".format(marks),
+                    orphans)
+        con.execute(
+            "DELETE FROM buildings WHERE id IN (SELECT id FROM buildings b"
+            " WHERE NOT EXISTS (SELECT 1 FROM units u"
+            " WHERE u.building_id=b.id))")
+    report["deleted_units"] = len(orphans)
+    report["deleted_buildings"] = con.execute(
+        "SELECT changes()").fetchone()[0] if orphans else 0
+
+    # 2. evidence がある unit は再集約
+    unit_ids = [r[0] for r in con.execute("SELECT id FROM units")]
+    for uid in unit_ids:
+        verdicts = [(r[0], r[1]) for r in con.execute(
+            "SELECT tub_status, confidence FROM evidence"
+            " WHERE unit_id=? AND tub_status != 'unknown'", (uid,))]
+        status, conf = aggregate_tub_status(verdicts)
+        row = con.execute(
+            "SELECT tub_status, tub_confidence FROM units WHERE id=?",
+            (uid,)).fetchone()
+        if row and (row[0], row[1]) != (status, conf):
+            con.execute("UPDATE units SET tub_status=?, tub_confidence=?"
+                        " WHERE id=?", (status, conf, uid))
+            report["reaggregated"] += 1
+
+    # 3. evidence 無し unit は properties から復元
+    bare = [r[0] for r in con.execute(
+        "SELECT id FROM units u WHERE NOT EXISTS"
+        " (SELECT 1 FROM evidence e WHERE e.unit_id=u.id)")]
+    for uid in bare:
+        props = [(r[0], r[1], r[2]) for r in con.execute(
+            "SELECT p.has_bathtub, p.no_bathtub_evidence, p.equipment"
+            " FROM listings l JOIN properties p ON p.detail_url=l.url"
+            " WHERE l.unit_id=?", (uid,))]
+        verdict = _reconcile_verdict(props)
+        if verdict is None:
+            report["still_unknown"] += 1
+            continue
+        status, conf, quote = verdict
+        url = con.execute("SELECT url FROM listings WHERE unit_id=?"
+                          " LIMIT 1", (uid,)).fetchone()
+        con.execute("INSERT INTO evidence(unit_id,tub_status,quote,url,"
+                    "method,confidence) VALUES(?,?,?,?,?,?)",
+                    (uid, status, quote, url[0] if url else None,
+                     _RECONCILE_METHOD, conf))
+        con.execute("UPDATE units SET tub_status=?, tub_confidence=?"
+                    " WHERE id=?", (status, conf, uid))
+        report["restored"] += 1
+    return report
+
+
 def judge_tub(d):
     """-> (status, keyword, confidence)
 
