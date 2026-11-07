@@ -159,8 +159,15 @@ td.url a{color:#0d5bd8}
   <label><input type="checkbox" id="f_eff">実質月額あるのみ</label>
   <span id="f_layouts"></span>
   <span id="f_stations"></span>
-  <label>築 <input type="number" id="f_age" placeholder="上限" min="0"
-    max="60" style="width:56px" oninput="render()">年以内</label>
+  <label>築 <select id="f_age">
+    <option value="">指定なし</option>
+    <option value="5">5年以内</option>
+    <option value="10">10年以内</option>
+    <option value="15">15年以内</option>
+    <option value="20">20年以内</option>
+    <option value="25">25年以内</option>
+    <option value="30">30年以内</option>
+  </select></label>
   <label>検索 <input type="text" id="f_q" oninput="render()"
     placeholder="建物名・設備"></label>
   <span>ソート:
