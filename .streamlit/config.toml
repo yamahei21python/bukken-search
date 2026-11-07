@@ -1,0 +1,10 @@
+# Streamlit Community Cloud 用設定
+[theme]
+base = "light"
+primaryColor = "#0068c4"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
