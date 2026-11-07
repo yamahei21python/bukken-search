@@ -124,10 +124,14 @@ header .legend{font-size:10.5px;opacity:.6;margin-top:4px;line-height:1.5}
 #filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;
   padding:10px 16px;background:#fff;border-bottom:1px solid #e2e6ec;
   font-size:13px;position:sticky;top:0;z-index:900}
+#filters > label{align-items:center;height:30px}
 #filters label{display:flex;gap:4px;align-items:center}
 .dd{position:relative}
-.dd-btn{border:1px solid #c9d2de;background:#fff;border-radius:6px;
-  padding:4px 10px;font-size:12.5px;cursor:pointer}
+/* フィルタの select と dd-btn を同じ箱形状に統一 */
+#filters select, .dd-btn{border:1px solid #9aa5b1;background:#fff;
+  border-radius:5px;padding:3px 8px;font-size:13px;height:30px;
+  box-sizing:border-box;cursor:pointer}
+.dd-btn{min-width:64px;text-align:center}
 .dd.open .dd-btn{background:#0d2f5a;color:#fff;border-color:#0d2f5a}
 .dd-panel{display:none;position:absolute;top:110%;left:0;z-index:1000;
   background:#fff;border:1px solid #c9d2de;border-radius:6px;
