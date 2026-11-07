@@ -348,8 +348,8 @@ function render() {
     "建物(リンク)": "クリックでSUUMOの物件ページを開く",
     設備: "SUUMO記載の設備一覧 (先頭120文字)",
   };
-  const hs = ["割安%", "総額", "実質", "2年", "間取", "面積", "階", "築",
-              "徒歩", "駅", "建物(リンク)", "設備"];
+  const hs = ["割安%", "総額", "実質", "2年", "面積", "階", "築",
+              "間取", "駅", "徒歩", "建物(リンク)", "設備"];
   thead.innerHTML = "<tr>" + hs.map(h =>
     `<th title="${tips[h] ?? ""}">${h}</th>`).join("") + "</tr>";
   const tb = document.getElementById("tbl").tBodies[0];
@@ -359,8 +359,8 @@ function render() {
       + `<td>${(r.tot / 10000).toFixed(1)}万</td>`
       + `<td>${r.eff ? (r.eff / 10000).toFixed(2) + "万" : "-"}</td>`
       + `<td>${r.t2 ? (r.t2 / 10000).toFixed(0) + "万" : "-"}</td>`
-      + `<td>${r.l || "-"}</td><td>${r.a ?? "-"}</td><td>${r.f ?? "-"}</td>`
-      + `<td>${r.y ?? "-"}</td><td>${r.w ?? "-"}</td><td>${r.st || "-"}</td>`
+      + `<td>${r.a ?? "-"}</td><td>${r.f ?? "-"}</td><td>${r.y ?? "-"}</td>`
+      + `<td>${r.l || "-"}</td><td>${r.st || "-"}</td><td>${r.w ?? "-"}</td>`
       + `<td class="url"><a href="${r.url}" target="_blank" rel="noopener">${r.n}</a></td>`
       + `<td>${r.eq}</td></tr>`;
   }).join("");
