@@ -8,3 +8,4 @@ rank_out.txt
 .DS_Store
 bukken.local-*.bak
 .venv/
+site/

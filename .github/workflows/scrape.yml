@@ -101,6 +101,21 @@ jobs:
       - name: Rank
         run: python3 rank.py --max-total 100000 --walk-max 10 | tee rank_out.txt
 
+      # 静的サイト (Vercel / GitHub Pages) を gh-pages ブランチへ公開する。
+      # main には site/ をコミットしない (1日5.9MBずつ増えるのを防ぐ)。
+      - name: Build & publish static site (gh-pages)
+        run: |
+          python3 build_site.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          export GIT_INDEX_FILE=$(mktemp)
+          git add site/index.html site/data.json
+          tree=$(git write-tree)
+          commit=$(git commit-tree "$tree" \
+            -m "site: $(date -u +%Y-%m-%dT%H:%M:%SZ)")
+          git push --force origin "$commit:refs/heads/gh-pages"
+          rm -f "$GIT_INDEX_FILE"
+
       - name: Notify (optional)
         if: ${{ env.HAS_WEBHOOK == 'true' }}
         env:
