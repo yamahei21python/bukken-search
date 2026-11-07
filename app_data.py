@@ -4,6 +4,7 @@ cost_perf のヘドニック公正価値モデルと実質費用計算を UI 用
 DataFrame にまとめる。フィルタは cost_perf.scope を1つの実装として
 使う（CLI と画面で母集団の定義をズラさない）。
 """
+import re
 import sqlite3
 from types import SimpleNamespace
 
@@ -110,3 +111,76 @@ def display_table(out):
         if c in show.columns:
             show[c] = (show[c] / 10000).round(2)
     return show
+
+
+# SUUMO カセット見出しに建物名が未登録の掲載の見出しパターン
+# (「路線 駅 N階建 築N年」。地階つき「地下1地上12階建」も含む)
+POLLUTED_NAME = re.compile(
+    r"^(?:\S+線|\S+電鉄|\S+メトロ\S*)\s+\S+駅\s+"
+    r"(?:地下\d+)?(?:地上\d+)?\d+階建\s+(?:築\S+|新築)$")
+UNNAMED_LABEL = "(建物名未登録)"
+
+
+def is_polluted_name(name):
+    return bool(name and POLLUTED_NAME.match(str(name).strip()))
+
+
+def resolve_display_names(df, db_path=None):
+    """建物名が汚染見出しの行に、実名を表示用に付与する (DB は不変)。
+
+    SUUMO は建物名未登録の掲載 (約半数) で「路線 駅 N階建 築N年」を
+    見出しに使い、同名 building が別仲介の名前あり掲載と別建物として
+    保管される。同じ部屋 (間取り・面積±0.3・階) を持つ名前あり建物が
+    見つかれば同一建物とみなして名前を借用する — これは scraper の
+    unit 統合と同じ照合基準 (実測で 993/1,018 棟が復元可能)。
+    見つからない行は (建物名未登録)。
+    """
+    out = df.copy()
+    mask = out["name"].map(is_polluted_name)
+    if not mask.any():
+        out["name"] = out["name"].map(
+            lambda n: UNNAMED_LABEL if is_polluted_name(n) else n)
+        return out
+    con = sqlite3.connect(str(db_path or cp.DB))
+    try:
+        con.create_function("pat_name", 1,
+                            lambda v: bool(v and POLLUTED_NAME.match(
+                                str(v).strip())))
+        marks = ",".join("?" * int(mask.sum()))
+        poll_ids = [int(b) for b in out.loc[mask, "building_id"].unique()
+                    if b == b]  # NaN 除外
+        if not poll_ids:
+            out["name"] = out["name"].map(
+                lambda n: UNNAMED_LABEL if is_polluted_name(n) else n)
+            return out
+        marks = ",".join("?" * len(poll_ids))
+        best = {}
+        for bid, name, _m in con.execute(
+                f"""SELECT pb.id, nb.name, COUNT(*) m
+                    FROM buildings pb
+                    JOIN units pu ON pu.building_id = pb.id
+                    JOIN units nu ON nu.building_id != pb.id
+                      AND nu.layout = pu.layout
+                      AND ABS(nu.area_m2 - pu.area_m2) <= 0.3
+                      AND (nu.floor IS pu.floor OR nu.floor = pu.floor)
+                    JOIN buildings nb ON nb.id = nu.building_id
+                      AND nb.norm_address = pb.norm_address
+                    WHERE pb.id IN ({marks})
+                      AND NOT pat_name(nb.name)
+                      AND nb.name IS NOT NULL AND nb.name != ''
+                    GROUP BY pb.id, nb.name ORDER BY m DESC""",
+                poll_ids):
+            best.setdefault(bid, name)
+    finally:
+        con.close()
+    def _resolve(row_name, building_id):
+        if not is_polluted_name(row_name):
+            return row_name
+        if building_id is not None and building_id == building_id:
+            name = best.get(int(building_id))
+            if name:
+                return name
+        return UNNAMED_LABEL
+    out["name"] = [_resolve(n, b) for n, b in
+                   zip(out["name"], out["building_id"], strict=False)]
+    return out

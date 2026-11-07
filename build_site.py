@@ -83,6 +83,8 @@ def build(out_dir=OUT):
     fdf = app_data.apply_filters(df)
     out, meta = app_data.add_fair_value(fdf)
     out = out.sort_values("discount", ascending=False)
+    # 汚染見出しの建物名を部屋照合で実名に復元 (表示のみ)
+    out = app_data.resolve_display_names(out)
     rows = build_rows(out)
     payload = {
         "generated_at": datetime.now(timezone.utc)
@@ -118,6 +120,7 @@ body{font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;
 header{padding:12px 16px;background:#0d2f5a;color:#fff}
 header h1{font-size:16px;margin:0 0 4px}
 header .meta{font-size:11px;opacity:.75}
+header .legend{font-size:10.5px;opacity:.6;margin-top:4px;line-height:1.5}
 #filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;
   padding:10px 16px;background:#fff;border-bottom:1px solid #e2e6ec;
   font-size:13px;position:sticky;top:0;z-index:900}
@@ -144,6 +147,9 @@ td.url a{color:#0d5bd8}
 <header>
   <h1>阿波座 賃貸選別 <span id="cnt"></span></h1>
   <div class="meta" id="meta"></div>
+  <div class="legend">総額=毎月の賃料+管理費 / 実質=総額+毎月固定費+初期費用・更新料を2年で平準化した月額
+    / 2年=2年間の総支出(初期費用・敷金込み、フリーレント控除)
+    / 割安%=公正価値(同条件の予測適正額)より総額が安い割合 / 金額は万円単位</div>
 </header>
 <div id="filters">
   <label>総額上限 <input type="range" id="f_tot" min="50000" max="100000"
@@ -232,9 +238,24 @@ function render() {
     (document.getElementById("f_tot").value / 10000) + "万";
   document.getElementById("cnt").textContent = `hit ${rows.length.toLocaleString()}件`;
   const thead = document.getElementById("tbl").tHead;
-  thead.innerHTML = "<tr><th>割安%</th><th>総額</th><th>実質</th><th>2年</th>"
-    + "<th>間取</th><th>面積</th><th>階</th><th>築</th><th>徒歩</th>"
-    + "<th>駅</th><th>建物(リンク)</th><th>設備</th></tr>";
+  const tips = {
+    "割安%": "公正価値(同じ駅・間取り・面積・築年の物件から予測した適正額)"
+      + "より総額が安い割合。25%なら4分の1安い",
+    総額: "毎月の支払い = 賃料 + 管理費",
+    実質: "総額 + 毎月の固定費(水道・月額サポート) + 初期費用(礼金・仲介"
+      + "手数料・火災保険・鍵交換等)と更新料を2年で割った月額。"
+      + "初期費用取得済みの行のみ表示",
+    "2年": "2年間で払う総額 (初期費用・敷金・更新料込み、フリーレント分控除)",
+    面積: "専有面積 (m2)",
+    築: "築年数",
+    徒歩: "最寄り駅までの徒歩分数",
+    "建物(リンク)": "クリックでSUUMOの物件ページを開く",
+    設備: "SUUMO記載の設備一覧 (先頭120文字)",
+  };
+  const hs = ["割安%", "総額", "実質", "2年", "間取", "面積", "階", "築",
+              "徒歩", "駅", "建物(リンク)", "設備"];
+  thead.innerHTML = "<tr>" + hs.map(h =>
+    `<th title="${tips[h] ?? ""}">${h}</th>`).join("") + "</tr>";
   const tb = document.getElementById("tbl").tBodies[0];
   const shown = displayed();
   tb.innerHTML = shown.map(r => {

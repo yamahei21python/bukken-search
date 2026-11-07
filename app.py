@@ -25,6 +25,8 @@ def _run_pipeline(max_total, min_total, min_area, max_area, walk_max,
         max_area=max_area, walk_max=walk_max, max_age_days=max_age_days,
         layout=layout, station=station)
     out, meta = app_data.add_fair_value(fdf)
+    # 汚染見出しの建物名を実名に復元 (表示のみ・個人用 app も同表示)
+    out = app_data.resolve_display_names(out)
     return out, meta
 
 
