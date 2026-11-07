@@ -14,6 +14,7 @@ main への push (毎朝のスクレイプ) で Vercel が自動更新する。
 import json
 import math
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +31,21 @@ OUT = Path(__file__).parent / "site"
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 
 
+# SUUMO のカセット見出しに建物名が未登録の掲載は「路線 駅 N階建
+# 築N年」が物件名として入ってくる (約1,100名)。建物名として意味が
+# 無いため公開サイトでは表示しない (DB の元データは保持したまま)。
+_POLLUTED_NAME = re.compile(
+    r"^(?:\S+線|\S+電鉄|\S+メトロ\S*)\s+\S+駅\s+"
+    r"(?:地下\d+)?(?:地上\d+)?\d+階建\s+(?:築\S+|新築)$")
+_UNNAMED = "(建物名未登録)"
+
+
+def _display_name(n):
+    """汚染見出しを (建物名未登録) に置き換える表示用マスキング。"""
+    n = (n or "").strip()
+    return _UNNAMED if _POLLUTED_NAME.match(n) else n
+
+
 def _num(v):
     """JSON 用に NaN を None へ。"""
     if v is None:
@@ -44,7 +60,8 @@ def build_rows(out):
     rows = []
     for r in out.itertuples():
         rows.append({
-            "n": r.name, "st": r.station, "w": _num(r.walk_min),
+            "n": _display_name(r.name), "st": r.station,
+            "w": _num(r.walk_min),
             "l": r.layout, "a": _num(r.area_m2), "f": _num(r.room_floor),
             "y": _num(r.age_years), "tot": r.total_yen,
             "fair": _num(round(r.fair)),
