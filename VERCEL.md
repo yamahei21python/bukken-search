@@ -25,6 +25,19 @@ gh-pages ブランチだけが常に最新の2ファイルを持つ。
 以後、毎朝のスクレイプが gh-pages を更新すると Vercel が自動で
 再デプロイする。手動再デプロイは Vercel ダッシュボードから。
 
+## 自動更新 (済み設定 / VERCEL_TOKEN で有効化)
+
+CLI での初回デプロイは完了済み: **https://bukken-search.vercel.app**
+(project: bukken-search / yamahei21pythons-projects)
+
+毎朝のスクレイプ後に自動で再デプロイするには、トークンを1つ登録する:
+
+1. <https://vercel.com/account/tokens> でトークン作成
+2. `gh secret set VERCEL_TOKEN` (トークンを貼る)
+
+設定が無い間は gh-pages の更新のみで、Vercel 側は手動再デプロイ
+(dashboards の Redeploy ボタン) でも最新になる。
+
 ## 代替: GitHub Pages (Vercel 不要の場合)
 
 Settings → Pages → Source: **Deploy from a branch** →
