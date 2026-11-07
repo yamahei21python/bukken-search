@@ -165,9 +165,14 @@ td.url a{color:#0d5bd8}
 <div id="filters">
   <label>総額上限 <input type="range" id="f_tot" min="50000" max="100000"
     step="5000" value="100000" oninput="render()"><span id="f_tot_v"></span></label>
-  <label>徒歩 <input type="number" id="f_walk" value="10" min="1" max="20"
-    style="width:52px" oninput="render()">分</label>
-  <label><input type="checkbox" id="f_eff">実質月額あるのみ</label>
+  <label>徒歩 <select id="f_walk">
+    <option value="">指定なし</option>
+    <option value="3">3分以内</option>
+    <option value="5">5分以内</option>
+    <option value="7">7分以内</option>
+    <option value="10" selected>10分以内</option>
+    <option value="15">15分以内</option>
+  </select></label>
   <div class="dd">
     <button type="button" class="dd-btn" id="dd_lo_btn">間取り ▾</button>
     <div class="dd-panel" id="f_layouts"></div>
@@ -185,8 +190,6 @@ td.url a{color:#0d5bd8}
     <option value="25">25年以内</option>
     <option value="30">30年以内</option>
   </select></label>
-  <label>検索 <input type="text" id="f_q" oninput="render()"
-    placeholder="建物名・設備"></label>
   <span>ソート:
     <select id="f_sort" onchange="render()">
       <option value="disc">割安度</option><option value="tot">総額</option>
@@ -294,9 +297,9 @@ function tab(t) {
 }
 function filtered() {
   const tot = +document.getElementById("f_tot").value;
-  const walk = +document.getElementById("f_walk").value;
-  const effOnly = document.getElementById("f_eff").checked;
-  const q = document.getElementById("f_q").value.trim();
+  // 徒歩: セレクト (指定なし=徒歩不明行も含む)
+  const walkSel = document.getElementById("f_walk").value;
+  const walk = walkSel === "" ? null : +walkSel;
   const sort = document.getElementById("f_sort").value;
   // 間取り・駅: チェックが1つも無ければ全件
   const loSel = [...document.querySelectorAll(".f_lo:checked")]
@@ -307,12 +310,11 @@ function filtered() {
   const ageMax = document.getElementById("f_age").value;
   const age = ageMax === "" ? null : +ageMax;
   let rows = DATA.rows.filter(r =>
-    r.tot <= tot && r.w != null && r.w <= walk
-    && (!effOnly || r.eff != null)
+    r.tot <= tot
+    && (walk === null || (r.w != null && r.w <= walk))
     && (loSel.length === 0 || loSel.includes(r.l))
     && (stSel.length === 0 || stSel.includes(r.st))
-    && (age === null || (r.y != null && r.y <= age))
-    && (!q || (r.n + r.eq + r.st).includes(q)));
+    && (age === null || (r.y != null && r.y <= age)));
   const key = sort === "disc" ? "disc" : sort;
   rows.sort((a, b) => (b[key] ?? -1) - (a[key] ?? -1));
   return rows;
@@ -437,10 +439,6 @@ function drawMap() {
 }
 document.getElementById("filters").addEventListener("change", () => {
   if (typeof refreshDDLabels === "function") refreshDDLabels();
-  render();
-  drawMap();
-});
-document.getElementById("f_q").addEventListener("input", () => {
   render();
   drawMap();
 });
