@@ -18,7 +18,10 @@ DEFAULT_FILTERS = {
     "min_area": 12,
     "max_area": 110,
     "walk_max": 10,
-    "max_age_days": 14,
+    # 生きている物件は毎日全件が一覧で確認されるため、3日以上
+    # 見つからないものは SUUMO で掲載終了したとみなせる
+    # (実測: active はほぼ「0日前」に二極化)
+    "max_age_days": 3,
     "layout": None,
     "station": None,
     "no_tub": False,

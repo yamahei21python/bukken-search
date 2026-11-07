@@ -269,7 +269,7 @@ def save(rows):
     return n
 
 
-def deactivate_stale(days=7):
+def deactivate_stale(days=3):
     """一定日数見ていない listings を active=0 にする。
 
     従来は active=0 への遷移が無く、募集終了した物件が母集団に
@@ -302,9 +302,9 @@ def main():
                     help="1ページ毎の待機秒(負荷軽減)")
     ap.add_argument("--jitter", type=float, default=1.5,
                     help="待機に加えるランダム幅(秒)")
-    ap.add_argument("--stale-days", type=int, default=7,
-                    help="この日数見ていない listings を active=0 にする"
-                         "（全駅実行時のみ）")
+    ap.add_argument("--stale-days", type=int, default=3,
+                    help="この日数一覧で見つからない listing を inactive 化"
+                         " (毎日全駅を取得するため3日で十分)")
     a = ap.parse_args()
 
     init_db(rebuild=a.rebuild)
