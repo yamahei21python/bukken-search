@@ -31,6 +31,33 @@ def fetch(url: str, retry: int = 3) -> BeautifulSoup:
     return fetch_soup(url, retry=retry, retry_delay=2)
 
 
+# SUUMO の「掲載終了」ページの判定マーカー。これが含まれるページは
+# 物件データを持たないため、parse_detail に食わせるとほぼ NULL の
+# 結果で既存の良い値を上書きしてしまう (データ汚染)。
+DEAD_MARKERS = ("掲載が終了したため", "ページを表示できませんでした")
+
+
+def is_dead_page(soup):
+    """SUUMO の「掲載終了」ページかどうか。"""
+    text = soup.get_text(" ", strip=True)
+    return any(m in text for m in DEAD_MARKERS)
+
+
+def deactivate_listing(con, lid, url, reason="dead"):
+    """掲載終了の listing を active=0 にし、来歴を evidence に残す。
+
+    costs は触らない (fetched の履歴を保持)。再掲載された場合は
+    次回の一覧取得で active=1 に戻る。
+    """
+    con.execute("UPDATE listings SET active=0 WHERE id=?", (lid,))
+    con.execute(
+        "INSERT INTO evidence(unit_id, tub_status, quote, url, method,"
+        " confidence) VALUES"
+        "((SELECT unit_id FROM listings WHERE id=?), 'unknown', ?, ?,"
+        " 'dead_page', 0.0)",
+        (lid, f"[{reason}] SUUMO掲載終了を検知", url))
+
+
 def targets(con, limit, only_missing, max_total=100000, walk_max=10):
     """詳細取得の対象を「本命候補から先に」返す。
 
@@ -72,7 +99,16 @@ def _find_listing(con, url, fallback_pattern=None):
 
 
 def _parse_and_apply_detail(con, lid, uid, url, source, include_equipment=False):
-    """詳細ソースを解析・適用し、保存結果を表示。"""
+    """詳細ソースを解析・適用し、保存結果を表示。
+
+    SUUMO の「掲載終了」ページは解析せず即 inactive 化する
+    (NULL による既存値の上書き汚染と、サイトへの死んだリンクの
+    残留を防ぐ)。
+    """
+    if is_dead_page(source):
+        deactivate_listing(con, lid, url)
+        print(f"{lid} DEAD (掲載終了) -> inactive")
+        return
     detail = parse_detail(source)
     apply_detail(con, lid, uid, url, detail)
     con.commit()

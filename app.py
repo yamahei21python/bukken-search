@@ -50,7 +50,7 @@ with st.sidebar:
     equip_kw = st.text_input("設備キーワード (部分一致)",
                              help="例: オートロック、追焚、独立洗面")
 
-out, meta = _run_pipeline(max_total, 45000, min_area, max_area, walk_max, 14,
+out, meta = _run_pipeline(max_total, 45000, min_area, max_area, walk_max, 3,
                           layouts or None, None)
 
 if tub:

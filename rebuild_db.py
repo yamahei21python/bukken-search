@@ -4,7 +4,7 @@
   1. 元DBをタイムスタンプ付きでバックアップ
   2. スキーマ初期化（db.initialize_db）で不足テーブル/一意インデックスを補い、
      evidence / listing_snapshots の重複行を整理
-  3. 陳腐化した listings を active=0 化（--stale-days、既定7日）
+  3. 陳腐化した listings を active=0 化（--stale-days、既定3日）
   4. VACUUM で肥大化したファイルを圧縮
   5. 前後の件数と監査サマリを表示（db_audit を併用）
 
@@ -42,7 +42,7 @@ def counts(db_path):
 def main():
     ap = argparse.ArgumentParser(description="bukken.db 再構築")
     ap.add_argument("--db", type=Path, default=DB)
-    ap.add_argument("--stale-days", type=int, default=7)
+    ap.add_argument("--stale-days", type=int, default=3)
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     if not a.db.exists():
