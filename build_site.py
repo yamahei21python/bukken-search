@@ -44,7 +44,8 @@ def build_rows(out):
             "disc": _num(round(r.discount * 100, 1)),
             "eff": _num(round(r.eff_monthly)) if pd.notna(r.eff_monthly) else None,
             "t2": _num(round(r.t2)) if pd.notna(r.t2) else None,
-            "tub": r.u_tub_status,
+            # 湯船判定は検索戦略が推測できるため公開データには含めない
+            # (自家用の Streamlit app のみに表示)
             "eq": "" if pd.isna(r.equipment) else str(r.equipment)[:120],
             "url": r.detail_url,
             "lat": _num(r.b_lat), "lon": _num(r.b_lon),
@@ -109,7 +110,6 @@ tr:hover td{background:#f2f7ff}
 td.url a{color:#0d5bd8}
 .disc{font-weight:700;color:#c0392b}
 .tag{font-size:10px;border-radius:4px;padding:1px 5px;color:#fff}
-.t-tub{background:#2e8b57}.t-unknown{background:#8a94a3}
 #map{height:70vh;margin:8px 16px;border-radius:8px}
 #hint{padding:2px 16px;font-size:11px;color:#69748a}
 </style>
@@ -124,7 +124,6 @@ td.url a{color:#0d5bd8}
     step="5000" value="100000" oninput="render()"><span id="f_tot_v"></span></label>
   <label>徒歩 <input type="number" id="f_walk" value="10" min="1" max="20"
     style="width:52px" oninput="render()">分</label>
-  <label><input type="checkbox" id="f_notub">湯船なし側のみ</label>
   <label><input type="checkbox" id="f_eff">実質月額あるのみ</label>
   <label>検索 <input type="text" id="f_q" oninput="render()"
     placeholder="建物名・設備"></label>
@@ -133,6 +132,14 @@ td.url a{color:#0d5bd8}
       <option value="disc">割安度</option><option value="tot">総額</option>
       <option value="eff">実質月額</option><option value="t2">2年総額</option>
     </select></span>
+  <span>表示:
+    <select id="f_limit" onchange="render()">
+      <option value="50">50件</option>
+      <option value="100" selected>100件</option>
+      <option value="300">300件</option>
+      <option value="1000">1000件</option>
+      <option value="0">全件</option>
+    </select></span>
 </div>
 <div id="tabs">
   <button id="tab_t" class="on" onclick="tab('t')">一覧</button>
@@ -140,12 +147,13 @@ td.url a{color:#0d5bd8}
 </div>
 <div id="tblwrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
 <div id="map"></div>
+<div style="padding:0 16px;font-size:11px;color:#69748a">
+  マップ: 表示件数セレクタに連動 (既定=割安上位100件)。
+  割安度が高いほど大きく・赤く (青=低 → 赤=高。赤の上限は上位5%起点で自動調整)</div>
 <div id="hint">静的生成のため値下げ等の即時性はスクレイプ時点 (毎朝)。
 詳細は SUUMO リンクで確認。</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const TUB_JP = {confirmed_no_tub:"湯なし確定", likely_no_tub:"湯なしょか",
-  unknown:"不明", likely_tub:"湯ありよか", confirmed_tub:"湯あり確定"};
 let DATA, MAP, LAYER;
 fetch("data.json").then(r => r.json()).then(d => {
   DATA = d;
@@ -165,18 +173,21 @@ function tab(t) {
 function filtered() {
   const tot = +document.getElementById("f_tot").value;
   const walk = +document.getElementById("f_walk").value;
-  const notub = document.getElementById("f_notub").checked;
   const effOnly = document.getElementById("f_eff").checked;
   const q = document.getElementById("f_q").value.trim();
   const sort = document.getElementById("f_sort").value;
   let rows = DATA.rows.filter(r =>
     r.tot <= tot && r.w != null && r.w <= walk
-    && (!notub || r.tub.endsWith("no_tub") || r.tub === "unknown")
     && (!effOnly || r.eff != null)
     && (!q || (r.n + r.eq + r.st).includes(q)));
   const key = sort === "disc" ? "disc" : sort;
   rows.sort((a, b) => (b[key] ?? -1) - (a[key] ?? -1));
   return rows;
+}
+function displayed() {
+  const limit = +document.getElementById("f_limit").value;
+  const rows = filtered();
+  return limit > 0 ? rows.slice(0, limit) : rows;
 }
 function render() {
   const rows = filtered();
@@ -186,23 +197,23 @@ function render() {
   const thead = document.getElementById("tbl").tHead;
   thead.innerHTML = "<tr><th>割安%</th><th>総額</th><th>実質</th><th>2年</th>"
     + "<th>間取</th><th>面積</th><th>階</th><th>築</th><th>徒歩</th>"
-    + "<th>駅</th><th>湯船</th><th>建物</th><th>設備</th><th>リンク</th></tr>";
+    + "<th>駅</th><th>建物</th><th>設備</th><th>リンク</th></tr>";
   const tb = document.getElementById("tbl").tBodies[0];
-  tb.innerHTML = rows.slice(0, 300).map(r => {
-    const cls = r.tub.includes("no") ? "t-tub" : "t-unknown";
+  const shown = displayed();
+  tb.innerHTML = shown.map(r => {
     return `<tr><td class="disc">${r.disc ?? "-"}</td>`
       + `<td>${(r.tot / 10000).toFixed(1)}万</td>`
       + `<td>${r.eff ? (r.eff / 10000).toFixed(2) + "万" : "-"}</td>`
       + `<td>${r.t2 ? (r.t2 / 10000).toFixed(0) + "万" : "-"}</td>`
       + `<td>${r.l || "-"}</td><td>${r.a ?? "-"}</td><td>${r.f ?? "-"}</td>`
       + `<td>${r.y ?? "-"}</td><td>${r.w ?? "-"}</td><td>${r.st || "-"}</td>`
-      + `<td><span class="tag ${cls}">${TUB_JP[r.tub] || r.tub}</span></td>`
       + `<td>${r.n}</td><td>${r.eq}</td>`
       + `<td class="url"><a href="${r.url}" target="_blank" rel="noopener">SUUMO</a></td></tr>`;
   }).join("");
-  if (rows.length > 300) {
+  if (shown.length < rows.length) {
     tb.insertAdjacentHTML("beforeend",
-      `<tr><td colspan=14>… 先頭300件のみ表示 (全${rows.length}件)。</td></tr>`);
+      `<tr><td colspan=13>… 先頭${shown.length}件のみ表示`
+      + ` (条件に合うのは全${rows.length}件)。</td></tr>`);
   }
 }
 function initMap() {
@@ -215,22 +226,39 @@ function initMap() {
 function drawMap() {
   if (!LAYER) return;
   LAYER.clearLayers();
-  const rows = filtered().filter(r => r.lat != null && r.lon != null);
+
+  // 地図も「表示」セレクタの上位N件に連動 (全件だと重く視認性も低下)
+  const rows = displayed().filter(r => r.lat != null && r.lon != null);
+  const discs = rows.map(r => r.disc ?? 0).sort((a, b) => a - b);
+  const dmax = discs.length ? discs[Math.floor(discs.length * 0.95)] : 0;
+  const scale = v => Math.max(0, Math.min(1, v / Math.max(dmax, 1)));
   for (const r of rows) {
-    const tub = r.tub.includes("no");
-    L.circleMarker([r.lat, r.lon], {radius: 6,
-      color: tub ? "#2e8b57" : "#8a94a3", fillOpacity: .75})
-      .bindPopup(`<b>${r.n}</b><br>${(r.tot / 10000).toFixed(1)}万 `
-        + `割安${r.disc ?? "-"}%<br>${r.l} ${r.a}m2 ${r.st} 歩${r.w}分`
+    const t = scale(r.disc ?? 0);
+    // 割安度が高いほど赤く・大きく (青→赤のグラデーション)
+    L.circleMarker([r.lat, r.lon], {radius: 4 + 7 * t,
+      color: `hsl(${210 - 210 * t}, 70%, 42%)`,
+      fillColor: `hsl(${210 - 210 * t}, 70%, 55%)`, fillOpacity: .8,
+      weight: 1})
+      .bindPopup(`<b>${r.n}</b><br>割安 <b>${r.disc ?? "-"}%</b> `
+        + `(公正${r.fair ? (r.fair / 10000).toFixed(1) + "万" : "-"} /`
+        + ` 実${(r.tot / 10000).toFixed(1)}万)`
+        + `<br>${r.l} ${r.a}m2 ${r.st} 歩${r.w}分`
         + `<br><a href="${r.url}" target="_blank" rel="noopener">SUUMO</a>`)
       .addTo(LAYER);
   }
 }
-["f_notub", "f_eff"].forEach(id =>
-  document.getElementById(id).addEventListener("change", () => {
-    render();
-    drawMap();
-  }));
+document.getElementById("f_eff").addEventListener("change", () => {
+  render();
+  drawMap();
+});
+document.getElementById("f_limit").addEventListener("change", () => {
+  render();
+  drawMap();
+});
+document.getElementById("f_sort").addEventListener("change", () => {
+  render();
+  drawMap();
+});
 </script>
 </body>
 </html>
