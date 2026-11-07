@@ -125,6 +125,17 @@ header .legend{font-size:10.5px;opacity:.6;margin-top:4px;line-height:1.5}
   padding:10px 16px;background:#fff;border-bottom:1px solid #e2e6ec;
   font-size:13px;position:sticky;top:0;z-index:900}
 #filters label{display:flex;gap:4px;align-items:center}
+.dd{position:relative}
+.dd-btn{border:1px solid #c9d2de;background:#fff;border-radius:6px;
+  padding:4px 10px;font-size:12.5px;cursor:pointer}
+.dd.open .dd-btn{background:#0d2f5a;color:#fff;border-color:#0d2f5a}
+.dd-panel{display:none;position:absolute;top:110%;left:0;z-index:1000;
+  background:#fff;border:1px solid #c9d2de;border-radius:6px;
+  box-shadow:0 4px 12px rgba(0,0,0,.14);padding:8px 10px;
+  max-height:300px;overflow:auto;min-width:150px}
+.dd.open .dd-panel{display:block}
+.dd-panel label{display:block;padding:3px 2px;font-size:12.5px;
+  white-space:nowrap;gap:6px}
 #filters input[type=text]{width:140px}
 #tabs{display:flex;justify-content:center;gap:8px;padding:8px 16px 0}
 #tabs button{border:1px solid #c9d2de;background:#fff;border-radius:6px;
@@ -157,8 +168,14 @@ td.url a{color:#0d5bd8}
   <label>徒歩 <input type="number" id="f_walk" value="10" min="1" max="20"
     style="width:52px" oninput="render()">分</label>
   <label><input type="checkbox" id="f_eff">実質月額あるのみ</label>
-  <span id="f_layouts"></span>
-  <span id="f_stations"></span>
+  <div class="dd">
+    <button type="button" class="dd-btn" id="dd_lo_btn">間取り ▾</button>
+    <div class="dd-panel" id="f_layouts"></div>
+  </div>
+  <div class="dd">
+    <button type="button" class="dd-btn" id="dd_st_btn">駅 ▾</button>
+    <div class="dd-panel" id="f_stations"></div>
+  </div>
   <label>築 <select id="f_age">
     <option value="">指定なし</option>
     <option value="5">5年以内</option>
@@ -220,12 +237,44 @@ fetch("data.json").then(r => r.json()).then(d => {
     if (k) sfreq[k] = (sfreq[k] || 0) + 1;
   }
   const stations = Object.keys(sfreq).sort((a, b) => sfreq[b] - sfreq[a]);
-  document.getElementById("f_stations").innerHTML =
-    `<b style="opacity:.7">駅:</b>` + stations.map(st =>
-      `<label style="margin-right:6px"><input type="checkbox"
-        class="f_st" value="${st}">${st}</label>`).join("");
+  document.getElementById("f_stations").innerHTML = stations.map(st =>
+    `<label><input type="checkbox" class="f_st" value="${st}">${st}</label>`)
+    .join("");
+  wireDropdowns();
   render();
   initMap();
+  // ドロップダウン: クリックで下に開き、外側クリックで閉じる。
+  // ボタンには選択数を表示する
+  function wireDropdowns() {
+    for (const [btnId, panelId, label] of [
+      ["dd_lo_btn", "f_layouts", "間取り"],
+      ["dd_st_btn", "f_stations", "駅"]]) {
+      const btn = document.getElementById(btnId);
+      const dd = btn.parentElement;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const wasOpen = dd.classList.contains("open");
+        for (const d of document.querySelectorAll(".dd.open"))
+          d.classList.remove("open");
+        if (!wasOpen) dd.classList.add("open");
+      };
+      dd.addEventListener("change", refreshDDLabels);
+    }
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".dd"))
+        for (const d of document.querySelectorAll(".dd.open"))
+          d.classList.remove("open");
+    });
+    refreshDDLabels();
+  }
+  function refreshDDLabels() {
+    const count = (cls) =>
+      document.querySelectorAll(cls + ":checked").length;
+    document.getElementById("dd_lo_btn").textContent =
+      "間取り" + (count(".f_lo") ? ` (${count(".f_lo")})` : "") + " ▾";
+    document.getElementById("dd_st_btn").textContent =
+      "駅" + (count(".f_st") ? ` (${count(".f_st")})` : "") + " ▾";
+  }
 });
 function __gmCb() {
   PROVIDER = "g";
@@ -387,6 +436,7 @@ function drawMap() {
   }
 }
 document.getElementById("filters").addEventListener("change", () => {
+  if (typeof refreshDDLabels === "function") refreshDDLabels();
   render();
   drawMap();
 });
